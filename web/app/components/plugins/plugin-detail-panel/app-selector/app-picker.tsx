@@ -1,0 +1,189 @@
+'use client'
+
+import type { AppPartial } from '@dify/contracts/api/console/apps/types.gen'
+import type { ComboboxPositionerProps } from '@langgenius/dify-ui/combobox'
+import type { ReactNode } from 'react'
+import { Button } from '@langgenius/dify-ui/button'
+import {
+  Combobox,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxInputGroup,
+  ComboboxItem,
+  ComboboxItemText,
+  ComboboxList,
+  ComboboxPopup,
+  ComboboxPortal,
+  ComboboxPositioner,
+  ComboboxStatus,
+  ComboboxTrigger,
+} from '@langgenius/dify-ui/combobox'
+import {
+  ScrollArea,
+  ScrollAreaContent,
+  ScrollAreaScrollbar,
+  ScrollAreaThumb,
+  ScrollAreaViewport,
+} from '@langgenius/dify-ui/scroll-area'
+import { useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
+import AppIcon from '@/app/components/base/app-icon'
+
+type AppPickerProps = Pick<ComboboxPositionerProps, 'placement'> & {
+  scope?: string
+  disabled: boolean
+  trigger: ReactNode
+  offset?: number
+  isShow: boolean
+  onShowChange: (isShow: boolean) => void
+  onSelect: (app: AppPartial) => void
+  apps: AppPartial[]
+  isLoading: boolean
+  hasMore: boolean
+  onLoadMore: () => void
+  searchText: string
+  onSearchChange: (text: string) => void
+}
+
+function getAppTypeLabel(app: AppPartial) {
+  switch (app.mode) {
+    case 'advanced-chat':
+      return 'chatflow'
+    case 'agent-chat':
+      return 'agent'
+    case 'chat':
+      return 'chat'
+    case 'completion':
+      return 'completion'
+    case 'workflow':
+      return 'workflow'
+    default:
+      return app.mode
+  }
+}
+
+function getAppSearchText(app: AppPartial) {
+  return `${app.name} ${app.id} ${getAppTypeLabel(app)}`
+}
+
+function AppPickerOption({ app }: { app: AppPartial }) {
+  return (
+    <ComboboxItem
+      key={app.id}
+      value={app}
+      className="grid-cols-[minmax(0,1fr)_auto] gap-3 py-1 pr-3 pl-2"
+    >
+      <ComboboxItemText className="flex items-center gap-3">
+        <AppIcon className="shrink-0" size="xs" icon={app} />
+        <span className="min-w-0 grow truncate system-sm-medium text-components-input-text-filled">
+          <span className="mr-1">{app.name}</span>
+          <span className="text-text-tertiary">({app.id.slice(0, 8)})</span>
+        </span>
+      </ComboboxItemText>
+      <span className="shrink-0 system-2xs-medium-uppercase text-text-tertiary">
+        {getAppTypeLabel(app)}
+      </span>
+    </ComboboxItem>
+  )
+}
+
+export function AppPicker({
+  disabled,
+  trigger,
+  placement = 'right-start',
+  offset = 0,
+  isShow,
+  onShowChange,
+  onSelect,
+  apps,
+  isLoading,
+  hasMore,
+  onLoadMore,
+  searchText,
+  onSearchChange,
+}: AppPickerProps) {
+  const { t } = useTranslation(['app', 'common', 'workflow'])
+  const handleValueChange = useCallback(
+    (app: AppPartial | null) => {
+      if (!app) return
+
+      onSelect(app)
+      onShowChange(false)
+    },
+    [onSelect, onShowChange],
+  )
+
+  return (
+    <Combobox<AppPartial>
+      items={apps}
+      open={isShow}
+      inputValue={searchText}
+      onOpenChange={onShowChange}
+      onInputValueChange={onSearchChange}
+      onValueChange={handleValueChange}
+      itemToStringLabel={(app) => app?.name ?? ''}
+      itemToStringValue={(app) => app?.id ?? ''}
+      filter={(app, query) => getAppSearchText(app).toLowerCase().includes(query.toLowerCase())}
+      disabled={disabled}
+    >
+      <ComboboxTrigger
+        aria-label={t(($) => $['appSelector.label'], { ns: 'app' })}
+        className="block w-full min-w-0 rounded-lg text-left data-disabled:cursor-not-allowed data-disabled:bg-components-input-bg-disabled"
+      >
+        {trigger}
+      </ComboboxTrigger>
+      <ComboboxPortal>
+        <ComboboxPositioner placement={placement} sideOffset={offset}>
+          <ComboboxPopup
+            aria-label={t(($) => $['appSelector.label'], { ns: 'app' })}
+            className="border-0 bg-transparent p-0 shadow-none backdrop-blur-none"
+          >
+            <div className="relative flex max-h-100 min-h-20 w-89 flex-col rounded-xl border-[0.5px] border-components-panel-border bg-components-panel-bg-blur shadow-lg backdrop-blur-xs">
+              <ComboboxInputGroup>
+                <span
+                  className="i-ri-search-line size-4 shrink-0 text-text-tertiary"
+                  aria-hidden="true"
+                />
+                <ComboboxInput
+                  aria-label={t(($) => $['appSelector.placeholder'], { ns: 'app' })}
+                  placeholder={t(($) => $['appSelector.placeholder'], { ns: 'app' })}
+                />
+              </ComboboxInputGroup>
+              <ScrollArea className="min-h-0 flex-1 overflow-hidden">
+                <ScrollAreaViewport
+                  role="region"
+                  aria-label={t(($) => $['appSelector.label'], { ns: 'app' })}
+                  style={{ overflowX: 'hidden' }}
+                >
+                  <ScrollAreaContent className="p-1" style={{ minWidth: 0 }}>
+                    <ComboboxStatus>
+                      {isLoading ? t(($) => $.loading, { ns: 'common' }) : null}
+                    </ComboboxStatus>
+                    <ComboboxList<AppPartial> className="max-h-none overflow-visible p-0">
+                      {(app) => <AppPickerOption key={app.id} app={app} />}
+                    </ComboboxList>
+                    <ComboboxEmpty>
+                      {!isLoading ? t(($) => $.noData, { ns: 'common' }) : null}
+                    </ComboboxEmpty>
+                    {hasMore && (
+                      <div className="flex justify-center px-3 py-2">
+                        <Button size="small" disabled={isLoading} onClick={() => onLoadMore()}>
+                          {isLoading
+                            ? t(($) => $.loading, { ns: 'common' })
+                            : t(($) => $['common.loadMore'], { ns: 'workflow' })}
+                        </Button>
+                      </div>
+                    )}
+                  </ScrollAreaContent>
+                </ScrollAreaViewport>
+                <ScrollAreaScrollbar>
+                  <ScrollAreaThumb />
+                </ScrollAreaScrollbar>
+              </ScrollArea>
+            </div>
+          </ComboboxPopup>
+        </ComboboxPositioner>
+      </ComboboxPortal>
+    </Combobox>
+  )
+}

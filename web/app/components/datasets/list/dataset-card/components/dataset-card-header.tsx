@@ -1,0 +1,144 @@
+import type { DatasetDetailWithPartialMembersResponse } from '@dify/contracts/api/console/datasets/types.gen'
+import { cn } from '@langgenius/dify-ui/cn'
+import * as React from 'react'
+import { useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
+import AppIcon from '@/app/components/base/app-icon'
+import { toChunkingMode } from '@/app/components/datasets/dataset-fields'
+import { useKnowledge } from '@/hooks/use-knowledge'
+import { DOC_FORM_ICON_CLASS_WITH_BG, DOC_FORM_TEXT } from '@/models/datasets'
+
+const EXTERNAL_PROVIDER = 'external'
+const docModeInfoClassName =
+  'flex min-h-3 items-center gap-x-3 system-2xs-medium-uppercase text-text-tertiary'
+
+type DatasetCardHeaderProps = {
+  dataset: DatasetDetailWithPartialMembersResponse
+  nameId?: string
+}
+
+// DocModeInfo component - placed before usage
+type DocModeInfoProps = {
+  dataset: DatasetDetailWithPartialMembersResponse
+  isExternalProvider: boolean
+  isShowDocModeInfo: boolean
+}
+
+const DocModeInfo = ({ dataset, isExternalProvider, isShowDocModeInfo }: DocModeInfoProps) => {
+  const { t } = useTranslation(['dataset'])
+  const { formatIndexingTechniqueAndMethod } = useKnowledge()
+  const isPipeline = dataset.embedding_available && dataset.runtime_mode === 'rag_pipeline'
+
+  if (isExternalProvider) {
+    return (
+      <div className={docModeInfoClassName}>
+        <span>{t(($) => $.externalKnowledgeBase, { ns: 'dataset' })}</span>
+      </div>
+    )
+  }
+
+  if (!isShowDocModeInfo && !isPipeline)
+    return <div aria-hidden="true" className={docModeInfoClassName} />
+
+  const indexingText = dataset.indexing_technique
+    ? formatIndexingTechniqueAndMethod(
+        dataset.indexing_technique,
+        dataset.retrieval_model_dict.search_method,
+      )
+    : ''
+  const chunkingMode = toChunkingMode(dataset.doc_form)
+
+  return (
+    <div className={docModeInfoClassName}>
+      {isPipeline && (
+        <span className="max-w-full min-w-0 truncate">
+          {t(($) => $['cornerLabel.pipeline'], { ns: 'dataset' })}
+        </span>
+      )}
+      {isShowDocModeInfo && !!chunkingMode && (
+        <span
+          className="max-w-full min-w-0 truncate"
+          title={t(($) => $[`chunkingMode.${DOC_FORM_TEXT[chunkingMode]}`], { ns: 'dataset' })}
+        >
+          {t(($) => $[`chunkingMode.${DOC_FORM_TEXT[chunkingMode]}`], { ns: 'dataset' })}
+        </span>
+      )}
+      {isShowDocModeInfo && dataset.indexing_technique && indexingText && (
+        <span className="max-w-full min-w-0 truncate" title={indexingText}>
+          {indexingText}
+        </span>
+      )}
+      {isShowDocModeInfo && dataset.is_multimodal && (
+        <span
+          className="max-w-full min-w-0 truncate"
+          title={t(($) => $.multimodal, { ns: 'dataset' })}
+        >
+          {t(($) => $.multimodal, { ns: 'dataset' })}
+        </span>
+      )}
+    </div>
+  )
+}
+
+// Main DatasetCardHeader component
+const DatasetCardHeader = ({ dataset, nameId }: DatasetCardHeaderProps) => {
+  const isExternalProvider = dataset.provider === EXTERNAL_PROVIDER
+
+  const isShowChunkingModeIcon =
+    dataset.doc_form && (dataset.runtime_mode !== 'rag_pipeline' || dataset.is_published)
+  const isShowDocModeInfo = Boolean(
+    dataset.doc_form &&
+    dataset.indexing_technique &&
+    dataset.retrieval_model_dict?.search_method &&
+    (dataset.runtime_mode !== 'rag_pipeline' || dataset.is_published),
+  )
+
+  const chunkingMode = toChunkingMode(dataset.doc_form)
+  const chunkingModeIcon = chunkingMode ? DOC_FORM_ICON_CLASS_WITH_BG[chunkingMode] : React.Fragment
+  const iconClassName = isExternalProvider ? DOC_FORM_ICON_CLASS_WITH_BG.external : chunkingModeIcon
+
+  const iconInfo = useMemo(
+    () =>
+      dataset.icon_info || {
+        icon: '📙',
+        icon_type: 'emoji' as const,
+        icon_background: '#FFF4ED',
+        icon_url: '',
+      },
+    [dataset.icon_info],
+  )
+
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-x-3 pt-4 pr-14 pb-2 pl-4',
+        !dataset.embedding_available && 'opacity-30',
+      )}
+    >
+      <div className="relative shrink-0">
+        <AppIcon size="large" icon={iconInfo} />
+        {(isShowChunkingModeIcon || isExternalProvider) && (
+          <div className="absolute -right-1 -bottom-1 z-5">
+            <span aria-hidden className={cn(iconClassName, 'size-4')} />
+          </div>
+        )}
+      </div>
+      <div className="flex grow flex-col gap-y-1 overflow-hidden py-px">
+        <div
+          id={nameId}
+          className="truncate system-md-semibold text-text-secondary"
+          title={dataset.name}
+        >
+          {dataset.name}
+        </div>
+        <DocModeInfo
+          dataset={dataset}
+          isExternalProvider={isExternalProvider}
+          isShowDocModeInfo={isShowDocModeInfo}
+        />
+      </div>
+    </div>
+  )
+}
+
+export default React.memo(DatasetCardHeader)
