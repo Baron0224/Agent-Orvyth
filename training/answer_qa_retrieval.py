@@ -3,6 +3,7 @@
 import argparse
 from difflib import SequenceMatcher
 from pathlib import Path
+import re
 
 
 def normalize(text):
@@ -26,7 +27,15 @@ def similarity(left, right):
     right_bigrams = bigrams(right)
     union = left_bigrams | right_bigrams
     overlap_score = len(left_bigrams & right_bigrams) / len(union) if union else 0.0
-    return 0.6 * sequence_score + 0.4 * overlap_score
+    character_score = 0.6 * sequence_score + 0.4 * overlap_score
+
+    # Short rephrasings often preserve a technical name such as README or PyTorch.
+    left_terms = set(re.findall(r"[a-z][a-z0-9_]*", left.lower()))
+    right_terms = set(re.findall(r"[a-z][a-z0-9_]*", right.lower()))
+    if left_terms and right_terms:
+        query_term_coverage = len(left_terms & right_terms) / len(left_terms)
+        character_score = max(character_score, 0.6 * character_score + 0.4 * query_term_coverage)
+    return character_score
 
 
 def load_pairs(path):
