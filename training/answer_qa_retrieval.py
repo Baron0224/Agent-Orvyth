@@ -55,7 +55,11 @@ def load_pairs(path):
     return pairs
 
 
-def emotional_fallback(question):
+def conversational_fallback(question):
+    greeting = question.strip().strip("，。！？!?、,. ").lower()
+    if greeting in {"你好", "您好", "嗨", "哈喽", "hello", "hi", "早上好", "晚上好"}:
+        return "你好呀，我在呢。今天想聊点什么？"
+
     urgent_phrases = ("伤害自己", "自杀", "不想活", "结束生命", "轻生")
     if any(phrase in question for phrase in urgent_phrases):
         return (
@@ -96,7 +100,7 @@ while True:
     matched_question, answer = max(pairs, key=lambda pair: similarity(question, pair[0]))
     score = similarity(question, matched_question)
     if score < args.threshold:
-        fallback = emotional_fallback(question)
+        fallback = conversational_fallback(question)
         if fallback:
             print(f"OpenAgent（陪伴回应，未从语料检索）：{fallback}")
         else:
