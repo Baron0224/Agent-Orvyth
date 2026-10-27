@@ -1,6 +1,7 @@
 """Train a small character-level question-to-answer GRU from random weights."""
 
 from copy import deepcopy
+import argparse
 from pathlib import Path
 import random
 
@@ -8,12 +9,16 @@ import torch
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_sequence
 
+parser = argparse.ArgumentParser(description="从随机权重训练字符级问答模型")
+parser.add_argument("--corpus", default="corpus.txt", help="training 目录中的语料文件名")
+parser.add_argument("--weights", default="tiny_qa_model.pt", help="training 目录中的权重文件名")
+args = parser.parse_args()
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 torch.manual_seed(42)
 random.seed(42)
 
-corpus_path = Path(__file__).with_name("corpus.txt")
+corpus_path = Path(__file__).with_name(args.corpus)
 lines = [
     line.strip()
     for line in corpus_path.read_text(encoding="utf-8-sig").splitlines()
@@ -150,7 +155,7 @@ for step in range(max_steps + 1):
 model.load_state_dict(best_state)
 model.eval()
 
-weights_path = Path(__file__).with_name("tiny_qa_model.pt")
+weights_path = Path(__file__).with_name(args.weights)
 torch.save(
     {
         "model": model.state_dict(),
