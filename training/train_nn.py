@@ -149,6 +149,10 @@ def generate(start, length=100, temperature=0.8, top_k=5):
         probabilities = torch.softmax(logits, dim=0)
         next_id = torch.multinomial(probabilities, num_samples=1).item()
         result += from_id[next_id]
+        # 一段回答后遇到下一轮用户标记时停止，避免把后续对话也混进回答。
+        if result.endswith("\n用户："):
+            result = result[:-len("\n用户：")]
+            break
     return result
 
 weights_path = Path(__file__).with_name("tiny_model.pt")
@@ -166,12 +170,15 @@ print(f"训练段落：{len(train_segments)}，验证段落：{len(val_segments)
 print(f"训练样本：{len(train_targets)}，验证样本：{len(val_targets)}")
 print(f"最佳步骤：{best_step}，最佳验证损失：{best_val_loss:.3f}")
 print(f"最佳权重已保存到：{weights_path.name}")
-print("固定提示生成检查（字符级模型可能仍会生成不连贯文本）：")
+print("验证集固定提示生成检查（这些问题没有参与本轮训练）：")
 prompts = [
-    "用户：我总是被手机分心，学习计划做不完。\n助手：",
-    "用户：我现在不需要建议，只想把事情说出来。\n助手：",
-    "用户：为什么模型会重复句子？\n助手：",
-]
+    segment.split("\n助手：", maxsplit=1)[0] + "\n助手："
+    for segment in val_segments
+    if segment.startswith("用户：") and "\n助手：" in segment
+][:3]
+if not prompts:
+    raise ValueError("验证集中没有完整的用户问题和助手回答，请检查 corpus.txt 的问答格式。")
+
 for prompt in prompts:
     print(f"\n提示：{prompt}")
     print(f"续写：{generate(prompt)}")
