@@ -59,6 +59,10 @@ def conversational_fallback(question):
     greeting = question.strip().strip("，。！？!?、,. ").lower()
     if greeting in {"你好", "您好", "嗨", "哈喽", "hello", "hi", "早上好", "晚上好"}:
         return "你好呀，我在呢。今天想聊点什么？"
+    if greeting in {"谢谢", "谢谢你", "多谢", "感谢"}:
+        return "不用谢呀。能陪你一起把事情理清楚，我很开心。还有什么想和我聊的吗？"
+    if greeting in {"再见", "拜拜", "回头见", "晚安"}:
+        return "好呀，那你先去忙。之后还想聊的话，再回来找我。"
 
     urgent_phrases = ("伤害自己", "自杀", "不想活", "结束生命", "轻生")
     if any(phrase in question for phrase in urgent_phrases):
@@ -104,7 +108,7 @@ while True:
         if fallback:
             print(f"OpenAgent（陪伴回应，未从语料检索）：{fallback}")
         else:
-            print("OpenAgent：语料里没有找到足够相似的问题，我不确定答案。你可以补充细节，或把这组问答加入语料。")
+            print("OpenAgent：这个问题我现在还没有把握，不想随便编给你。你愿意多说一点背景吗？我可以陪你一起找答案。")
     else:
         warm_intro = "嗯，我陪你一起看看："
         if answer.startswith(warm_intro):
