@@ -113,14 +113,21 @@ for step in range(max_steps + 1):
 model.load_state_dict(best_state)
 
 @torch.no_grad()
-def generate(start="用户：", length=120):
+def generate(start, length=100, temperature=0.8, top_k=5):
     model.eval()
+    unknown_chars = sorted(set(start) - set(to_id))
+    if unknown_chars:
+        raise ValueError(f"提示词里有语料未出现的字符：{''.join(unknown_chars)}。请换成语料中已有的文字。")
+
     result = start
     for _ in range(length):
         context = result[-context_size:]
-        context = "".join(char if char in to_id else vocab[0] for char in context)
         x = torch.tensor([[to_id[char] for char in context]], dtype=torch.long, device=device)
-        probabilities = torch.softmax(model(x)[0], dim=0)
+        logits = model(x)[0] / temperature
+        if top_k is not None and top_k < logits.numel():
+            cutoff = torch.topk(logits, top_k).values[-1]
+            logits[logits < cutoff] = float("-inf")
+        probabilities = torch.softmax(logits, dim=0)
         next_id = torch.multinomial(probabilities, num_samples=1).item()
         result += from_id[next_id]
     return result
@@ -140,5 +147,12 @@ print(f"训练段落：{len(train_segments)}，验证段落：{len(val_segments)
 print(f"训练样本：{len(train_targets)}，验证样本：{len(val_targets)}")
 print(f"最佳步骤：{best_step}，最佳验证损失：{best_val_loss:.3f}")
 print(f"最佳权重已保存到：{weights_path.name}")
-print("生成示例：")
-print(generate())
+print("固定提示生成检查（字符级模型可能仍会生成不连贯文本）：")
+prompts = [
+    "用户：我总是被手机分心，学习计划做不完。\n助手：",
+    "用户：我现在不需要建议，只想把事情说出来。\n助手：",
+    "用户：为什么模型会重复句子？\n助手：",
+]
+for prompt in prompts:
+    print(f"\n提示：{prompt}")
+    print(f"续写：{generate(prompt)}")
