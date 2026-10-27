@@ -46,6 +46,23 @@ def load_pairs(path):
     return pairs
 
 
+def emotional_fallback(question):
+    urgent_phrases = ("伤害自己", "自杀", "不想活", "结束生命", "轻生")
+    if any(phrase in question for phrase in urgent_phrases):
+        return (
+            "我很担心你现在的安全。请先远离可能伤害自己的物品，马上联系身边可信任的人陪着你，"
+            "并联系当地急救或危机支持服务；如果有立即危险，请立刻拨打当地急救电话。"
+        )
+
+    emotional_phrases = (
+        "迷茫", "孤独", "难过", "伤心", "烦恼", "焦虑", "委屈", "失落", "撑不住",
+        "压力很大", "心情不好", "心里堵", "想哭",
+    )
+    if any(phrase in question for phrase in emotional_phrases):
+        return "听起来你最近被这件事困扰着。愿意多说一点发生了什么吗？我先听你说，不急着给建议。"
+    return None
+
+
 parser = argparse.ArgumentParser(description="从本地问答语料中检索相似问题")
 parser.add_argument("--corpus", default="corpus_project.txt", help="training 目录中的语料文件名")
 parser.add_argument("--threshold", type=float, default=0.42, help="回答所需的最低相似度，范围 0 到 1")
@@ -70,6 +87,10 @@ while True:
     matched_question, answer = max(pairs, key=lambda pair: similarity(question, pair[0]))
     score = similarity(question, matched_question)
     if score < args.threshold:
-        print("OpenAgent：语料里没有找到足够相似的问题，我不确定答案。你可以补充细节，或把这组问答加入语料。")
+        fallback = emotional_fallback(question)
+        if fallback:
+            print(f"OpenAgent（陪伴回应，未从语料检索）：{fallback}")
+        else:
+            print("OpenAgent：语料里没有找到足够相似的问题，我不确定答案。你可以补充细节，或把这组问答加入语料。")
     else:
         print(f"OpenAgent（匹配度 {score:.2f}，参考问题：{matched_question}）：{answer}")
