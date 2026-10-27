@@ -93,4 +93,7 @@ while True:
         else:
             print("OpenAgent：语料里没有找到足够相似的问题，我不确定答案。你可以补充细节，或把这组问答加入语料。")
     else:
-        print(f"OpenAgent（匹配度 {score:.2f}，参考问题：{matched_question}）：嗯，我陪你一起看看：{answer}")
+        warm_intro = "嗯，我陪你一起看看："
+        if answer.startswith(warm_intro):
+            answer = answer[len(warm_intro) :].lstrip()
+        print(f"OpenAgent（匹配度 {score:.2f}，参考问题：{matched_question}）：{warm_intro}{answer}")
