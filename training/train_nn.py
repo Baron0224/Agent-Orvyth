@@ -48,7 +48,8 @@ train_segments = segments[val_count:]
 vocab = sorted(set("".join(segments)))
 to_id = {char: i for i, char in enumerate(vocab)}
 from_id = {i: char for char, i in to_id.items()}
-context_size = 12
+# 让模型能看到更长的问题上下文；12 个字符通常不足以包含完整问题。
+context_size = 32
 
 # 每段单独建立预测样本，不让样本跨越段落边界。
 def make_examples(selected_segments):
