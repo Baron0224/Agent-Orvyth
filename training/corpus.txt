@@ -417,8 +417,6 @@ OpenAgent的目标是帮助遇到问题的人，也陪伴想找人聊天的人�
 助手：先确认运行脚本的 Python 与安装 PyTorch 的环境相同，再检查安装的 PyTorch 是否包含 CUDA 支持和显卡驱动是否正常。把 `torch.__version__`、`sys.executable` 和完整错误发来再判断。
 用户：为什么必须使用 training 目录里的虚拟环境？
 助手：虚拟环境把这个项目需要的 Python 包隔离起来，避免和系统其他项目冲突。直接运行 `training\.venv\Scripts\python.exe` 能明确使用这套环境。
-用户：我应该在 PowerShell 还是 Python 的 >>> 里运行脚本？
-助手：在 PowerShell 运行。先看到 `PS C:\...>` 提示符，再输入包含 Python 路径和脚本路径的命令；`>>>` 是 Python 交互界面，要先输入 `exit()` 退出。
 用户：Windows 路径里有空格，命令怎么写？
 助手：把完整路径用双引号括起来。例如 `python "D:\GitHub work\OpenAgent\OpenAgent\training\train_qa.py"`，这样 PowerShell 不会把空格当成参数分隔。
 用户：我新建了 Python 文件，文件名末尾是 .py.txt 怎么办？
