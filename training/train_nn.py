@@ -154,7 +154,8 @@ def generate(start, length=100, temperature=0.8, top_k=5):
         if result.endswith("\n用户："):
             result = result[:-len("\n用户：")]
             break
-    return result
+    # 调用方已经单独显示提示词，只返回新生成的续写内容。
+    return result[len(start):]
 
 weights_path = Path(__file__).with_name("tiny_model.pt")
 torch.save({
