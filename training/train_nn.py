@@ -9,13 +9,32 @@ from torch import nn
 device = "cuda" if torch.cuda.is_available() else "cpu"
 torch.manual_seed(42)
 
-# 每一行视为一段独立语料，例如一组对话或一个介绍段落。
+# 将相邻的用户问题和助手回答合并成完整对话段落，让训练样本包含
+# “用户问题\n助手回答”的上下文；其他普通文本仍单独作为一段。
 text_path = Path(__file__).with_name("corpus.txt")
-segments = [
+lines = [
     line.strip()
     for line in text_path.read_text(encoding="utf-8-sig").splitlines()
     if line.strip()
 ]
+segments = []
+pending_user = None
+for line in lines:
+    if line.startswith("用户："):
+        if pending_user is not None:
+            segments.append(pending_user)
+        pending_user = line
+    elif line.startswith("助手：") and pending_user is not None:
+        segments.append(pending_user + "\n" + line)
+        pending_user = None
+    else:
+        if pending_user is not None:
+            segments.append(pending_user)
+            pending_user = None
+        segments.append(line)
+if pending_user is not None:
+    segments.append(pending_user)
+
 if len(segments) < 5:
     raise ValueError("语料至少需要 5 段非空文本，才能划分训练集和验证集。")
 
