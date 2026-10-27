@@ -1,4 +1,7 @@
+from copy import deepcopy
 from pathlib import Path
+import random
+
 import torch
 from torch import nn
 
@@ -6,37 +9,48 @@ from torch import nn
 device = "cuda" if torch.cuda.is_available() else "cpu"
 torch.manual_seed(42)
 
-# 读取自己的语料；模型参数从随机值开始，不加载预训练模型。
+# 每一行视为一段独立语料，例如一组对话或一个介绍段落。
 text_path = Path(__file__).with_name("corpus.txt")
-text = text_path.read_text(encoding="utf-8-sig").replace("\n", " ")
-if len(text) < 80:
-    raise ValueError("语料至少需要 80 个字符，才能划分训练集和验证集。")
+segments = [
+    line.strip()
+    for line in text_path.read_text(encoding="utf-8-sig").splitlines()
+    if line.strip()
+]
+if len(segments) < 5:
+    raise ValueError("语料至少需要 5 段非空文本，才能划分训练集和验证集。")
 
-vocab = sorted(set(text))
+# 按段落随机划分，避免把文件末尾某一种话题单独当成验证集。
+rng = random.Random(42)
+rng.shuffle(segments)
+val_count = max(1, round(len(segments) * 0.2))
+val_segments = segments[:val_count]
+train_segments = segments[val_count:]
+
+vocab = sorted(set("".join(segments)))
 to_id = {char: i for i, char in enumerate(vocab)}
 from_id = {i: char for char, i in to_id.items()}
-data = torch.tensor([to_id[c] for c in text], dtype=torch.long, device=device)
-
-# 按文本顺序切分：前 80% 用于训练，最后 20% 用于验证。
-# 验证集的输入可以看到分界点之前的上下文，但验证目标不会参与训练。
 context_size = 12
-split_at = int(len(data) * 0.8)
-train_data = data[:split_at]
-val_data = data[split_at - context_size:]
 
-if len(train_data) <= context_size or len(val_data) <= context_size:
-    raise ValueError("语料太短，无法生成训练和验证样本。请扩充 corpus.txt。")
+# 每段单独建立预测样本，不让样本跨越段落边界。
+def make_examples(selected_segments):
+    inputs = []
+    targets = []
+    for segment in selected_segments:
+        ids = [to_id[char] for char in segment]
+        for i in range(len(ids) - context_size):
+            inputs.append(ids[i:i + context_size])
+            targets.append(ids[i + context_size])
 
-train_inputs = torch.stack([
-    train_data[i:i + context_size]
-    for i in range(len(train_data) - context_size)
-])
-train_targets = train_data[context_size:]
-val_inputs = torch.stack([
-    val_data[i:i + context_size]
-    for i in range(len(val_data) - context_size)
-])
-val_targets = val_data[context_size:]
+    if not inputs:
+        raise ValueError("训练集或验证集太短。请让每段文字超过 12 个字符，并增加语料段落。")
+
+    return (
+        torch.tensor(inputs, dtype=torch.long, device=device),
+        torch.tensor(targets, dtype=torch.long, device=device),
+    )
+
+train_inputs, train_targets = make_examples(train_segments)
+val_inputs, val_targets = make_examples(val_segments)
 
 class TinyLanguageModel(nn.Module):
     def __init__(self, vocab_size, hidden_size=64):
@@ -50,19 +64,28 @@ class TinyLanguageModel(nn.Module):
         x, _ = self.rnn(x)
         return self.output(x[:, -1, :])
 
-model = TinyLanguageModel(len(vocab)).to(device)
+hidden_size = 64
+model = TinyLanguageModel(len(vocab), hidden_size=hidden_size).to(device)
 optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
 loss_fn = nn.CrossEntropyLoss()
 
 @torch.no_grad()
 def evaluate_loss(inputs, targets):
     model.eval()
-    result = loss_fn(model(inputs), targets).item()
+    value = loss_fn(model(inputs), targets).item()
     model.train()
-    return result
+    return value
 
-# 从随机权重开始训练，并定期比较训练损失与验证损失。
-for step in range(301):
+# 训练最多 500 步；验证集连续 5 次没有改善时提前停止。
+max_steps = 500
+evaluate_every = 25
+patience_limit = 5
+best_val_loss = float("inf")
+best_step = 0
+best_state = None
+steps_without_improvement = 0
+
+for step in range(max_steps + 1):
     model.train()
     logits = model(train_inputs)
     loss = loss_fn(logits, train_targets)
@@ -70,21 +93,35 @@ for step in range(301):
     loss.backward()
     optimizer.step()
 
-    if step % 100 == 0:
+    if step % evaluate_every == 0 or step == max_steps:
         train_loss = evaluate_loss(train_inputs, train_targets)
         val_loss = evaluate_loss(val_inputs, val_targets)
         print(f"step {step:3d} | train loss {train_loss:.3f} | val loss {val_loss:.3f}")
 
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_step = step
+            best_state = deepcopy(model.state_dict())
+            steps_without_improvement = 0
+        else:
+            steps_without_improvement += 1
+            if steps_without_improvement >= patience_limit:
+                print("验证损失连续多次没有改善，提前停止训练。")
+                break
+
+# 保存验证集表现最好的参数，而不是最后一步的参数。
+model.load_state_dict(best_state)
+
 @torch.no_grad()
-def generate(start="人工智能", length=100):
+def generate(start="用户：", length=120):
     model.eval()
     result = start
     for _ in range(length):
         context = result[-context_size:]
-        context = "".join(c if c in to_id else vocab[0] for c in context)
-        x = torch.tensor([[to_id[c] for c in context]], dtype=torch.long, device=device)
-        probs = torch.softmax(model(x)[0], dim=0)
-        next_id = torch.multinomial(probs, num_samples=1).item()
+        context = "".join(char if char in to_id else vocab[0] for char in context)
+        x = torch.tensor([[to_id[char] for char in context]], dtype=torch.long, device=device)
+        probabilities = torch.softmax(model(x)[0], dim=0)
+        next_id = torch.multinomial(probabilities, num_samples=1).item()
         result += from_id[next_id]
     return result
 
@@ -93,9 +130,15 @@ torch.save({
     "model": model.state_dict(),
     "vocab": vocab,
     "context_size": context_size,
+    "hidden_size": hidden_size,
+    "best_step": best_step,
+    "best_val_loss": best_val_loss,
 }, weights_path)
 
-print(f"\n训练完成，设备：{device}，训练字符：{len(train_data)}，验证字符：{len(val_targets)}")
-print(f"权重已保存到：{weights_path.name}")
+print(f"\n训练完成，设备：{device}")
+print(f"训练段落：{len(train_segments)}，验证段落：{len(val_segments)}")
+print(f"训练样本：{len(train_targets)}，验证样本：{len(val_targets)}")
+print(f"最佳步骤：{best_step}，最佳验证损失：{best_val_loss:.3f}")
+print(f"最佳权重已保存到：{weights_path.name}")
 print("生成示例：")
 print(generate())
