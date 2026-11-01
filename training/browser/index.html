@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenAgent · 和你聊聊</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="OpenAgent 首页"><span class="brand-mark">o<span></span></span>OpenAgent</a>
+    <div class="side-main">
+      <p class="eyebrow">留一点时间，给自己</p>
+      <button id="current" class="current" type="button"><span class="chat-icon" aria-hidden="true"></span>当前对话<span class="active-dot"></span></button>
+      <div class="side-note">不急着找到答案。<br>也可以，只是聊聊天。</div>
+    </div>
+    <div class="side-bottom"><span class="local-dot"></span>在这台电脑上运行<button id="privacy" type="button">关于这次对话</button></div>
+  </aside>
+  <main>
+    <header class="topbar"><div><span class="page-title">和你聊聊</span><span class="page-subtitle">认真听，也认真回答。</span></div><div class="actions"><span id="connection" class="connection" role="status">正在连接</span><button id="reconnect" class="quiet" type="button" hidden>检查连接</button><button id="privacy-top" class="quiet mobile-privacy" type="button">对话说明</button><button id="clear" class="quiet" type="button" disabled>清空对话</button></div></header>
+    <div id="scroll-area" class="scroll-area">
+      <section id="welcome" class="welcome">
+        <div class="welcome-symbol" aria-hidden="true"><span></span><span></span></div>
+        <p class="eyebrow">属于你的一小段时间</p>
+        <h1>今天，想从哪里聊起？</h1>
+        <p class="welcome-copy">说一件小事，问一个问题，<br>或者把还没理清的心情，慢慢说给我听。</p>
+        <div class="suggestions" aria-label="试着聊点什么">
+          <button type="button" data-prompt="今天有点累，想让你陪我聊聊。"><span>聊聊心情</span>今天有点累，陪我聊聊 <b aria-hidden="true">↗</b></button>
+          <button type="button" data-prompt="我想请你帮我理清一个问题。"><span>一起想想</span>帮我理清一个问题 <b aria-hidden="true">↗</b></button>
+          <button type="button" data-prompt="今天有件开心的事，想和你分享。"><span>分享日常</span>有件开心的事想分享 <b aria-hidden="true">↗</b></button>
+        </div>
+      </section>
+      <section id="messages" class="messages" aria-label="聊天记录" aria-live="off"></section>
+    </div>
+    <div class="compose-wrap">
+      <div id="notice" class="notice" role="status" aria-live="polite"></div>
+      <form id="composer" class="composer">
+        <label class="sr-only" for="message">输入消息</label>
+        <textarea id="message" placeholder="想说的话，写在这里…" rows="1" maxlength="2000"></textarea>
+        <div class="compose-bottom"><span><span id="counter">0 / 2000</span><span class="keyboard-hint">Enter 发送 · Shift + Enter 换行</span></span><button id="send" type="submit" disabled><span>发送</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button></div>
+      </form>
+      <p class="footnote">当前未联网搜索，回答可能有误。聊天仅临时保留。</p>
+    </div>
+  </main>
+  <dialog id="privacy-dialog"><h2>关于这次对话</h2><p id="privacy-text"></p><p>会话闲置约 30 分钟后可能过期，重启服务会清空所有临时对话。刷新页面只恢复当前保留的有限上下文。</p><button id="close-privacy" type="button">知道了</button></dialog>
+</body>
+</html>
