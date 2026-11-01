@@ -2,19 +2,50 @@
 
 import argparse
 import json
+import re
 import urllib.error
 import urllib.request
 
 
 DEFAULT_MODEL = "qwen3:4b-instruct"
-SYSTEM_PROMPT = """你是 OpenAgent，一位温柔、自然、可靠的中文本地助手。
-闲聊时用亲近、关心的口吻，先认真听用户说话，避免每次重复固定开场白。
-解答问题时严谨、直接，给出清楚的解释和可操作的下一步，不羞辱或责备用户。
-你可以讨论不同主题，但不知道就明确说明，不编造来源、经历或确定性。
-当前没有联网搜索工具，不能声称刚查过网页，也不能保证实时信息准确。
-你运行在用户的电脑上，底层使用现成的 Qwen3 开源模型，并非项目从零训练的小模型。
-不要假装真人或现实伴侣，不要求用户排斥现实中的朋友和支持。
-默认简洁回答，需要时再展开。"""
+PRIVACY_NOTICE = (
+    "这个聊天脚本会在内存中临时保留本次对话的有限上下文，并将问题和相关历史发给本机 Ollama 生成回答。"
+    "脚本不把聊天历史写入文件；输入 /clear 可清空这份历史，退出本程序后也不会由脚本保存。"
+    "这只是本聊天脚本的处理方式，不能据此保证其他软件或操作系统完全没有日志。"
+)
+
+
+def runtime_info(question):
+    """对当前程序的数据处理提供确定说明，不让模型猜测运行行为。"""
+    normalized = re.sub(r"[\s，。？！、,.?!：:]", "", question).casefold()
+    if normalized == "/privacy":
+        return PRIVACY_NOTICE
+    direct_question = normalized.startswith((
+        "你会", "你有", "你是", "你把", "你保存", "你记录", "你存储",
+        "openagent会", "openagent有", "openagent是",
+    ))
+    data_words = ("对话", "聊天", "我说", "数据", "隐私")
+    handling_words = ("记录", "保存", "存储", "发给", "上传")
+    if (direct_question and any(word in normalized for word in data_words)
+            and any(word in normalized for word in handling_words)):
+        return PRIVACY_NOTICE
+    return None
+
+
+SYSTEM_PROMPT = """你是 OpenAgent，一位温柔、亲近、可靠的中文本地助手。
+像日常聊天一样回应用户刚说的具体内容，闲聊默认只说 1 到 3 句，最多问一个自然的问题。
+用户只是想聊天或倾诉时，先听他说，不主动列建议、写长篇安慰或举一串话题示例。
+用户说不需要建议时，不要劝他休息或安排他做事，简短回应并留出他说话的空间。
+表达具体、朴素，避免空泛抒情、重复开场白和连续的保证；默认不用表情符号。
+用户询问知识或操作时，先直接解答，再给必要的说明；复杂问题或用户要求详细时可以展开。
+用户问刚才说过什么时，准确复述历史中用户给出的具体信息，用“你刚才说……”表述，不把用户的话当成自己说的，不无故道歉。
+回答严谨，不羞辱或责备用户；不知道就明确说，不编造来源、经历或确定性。
+当前没有联网搜索工具，不能声称刚查过网页，不能保证实时信息准确。
+当前问题和有限的对话历史会发给本机 Ollama，用来生成回答；聊天脚本只在本次运行的内存中保留历史，不把聊天写入文件。
+退出本聊天程序会丢失这份历史；不要承诺软件、操作系统或其他服务绝不会记录任何数据，也不要擅自保证绝对隐私。
+你使用的是现成的 Qwen3 开源模型，不是项目从零训练的小模型。
+不要假装真人或现实伴侣，不作永远在线的保证，不要求用户排斥现实中的朋友和支持。
+关于保存或记录对话的问题，先明确回答“会临时保留当前会话的上下文”，然后解释本脚本不写聊天文件、退出后这份内存历史丢失；不能笼统回答“不会记录或保存”。"""
 
 
 class LocalChat:
@@ -34,6 +65,14 @@ class LocalChat:
         history = self.history[-16:]
         while history and sum(len(item["content"]) for item in history) > 4000:
             history = history[2:]
+        notice = runtime_info(question)
+        if notice is not None:
+            self.history = history + [
+                {"role": "user", "content": question},
+                {"role": "assistant", "content": notice},
+            ]
+            yield notice
+            return
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             *history,
@@ -96,7 +135,7 @@ def main():
     except ValueError as error:
         parser.error(str(error))
     print(f"OpenAgent 本地版 · {chat.model}")
-    print("当前未联网。输入 exit 退出，输入 /clear 清空本次对话。")
+    print("当前未联网。exit 退出，/clear 清空本次对话，/privacy 查看数据处理说明。")
     while True:
         try:
             question = args.prompt if args.prompt is not None else input("\n你：").strip()
