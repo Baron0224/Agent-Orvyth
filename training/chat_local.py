@@ -59,10 +59,12 @@ SYSTEM_PROMPT = """你是 OpenAgent，提供热情、温柔、有恋爱氛围的
 
 
 class LocalChat:
-    def __init__(self, model=DEFAULT_MODEL):
+    def __init__(self, model=DEFAULT_MODEL, system_prompt=SYSTEM_PROMPT, privacy_notice=PRIVACY_NOTICE):
         if "cloud" in model.lower():
             raise ValueError("请选择已下载的本地模型，不使用云端模型。")
         self.model = model
+        self.system_prompt = system_prompt
+        self.privacy_notice = privacy_notice
         self.history = []
 
     def clear(self):
@@ -77,6 +79,7 @@ class LocalChat:
             history = history[2:]
         notice = runtime_info(question)
         if notice is not None:
+            notice = self.privacy_notice
             self.history = history + [
                 {"role": "user", "content": question},
                 {"role": "assistant", "content": notice},
@@ -84,7 +87,7 @@ class LocalChat:
             yield notice
             return
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": self.system_prompt},
             *history,
             {"role": "user", "content": question},
         ]
