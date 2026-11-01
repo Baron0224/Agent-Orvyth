@@ -2,8 +2,15 @@
 
 import argparse
 from difflib import SequenceMatcher
+import getpass
+import html
+import json
+import os
 from pathlib import Path
 import re
+import urllib.error
+import urllib.parse
+import urllib.request
 
 
 def normalize(text):
@@ -81,9 +88,48 @@ def conversational_fallback(question):
     return None
 
 
+def search_web(query, api_key, count=5):
+    endpoint = "https://api.search.brave.com/res/v1/web/search"
+    url = f"{endpoint}?{urllib.parse.urlencode({'q': query, 'count': count, 'safesearch': 'moderate'})}"
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "X-Subscription-Token": api_key,
+            "User-Agent": "OpenAgent-local-search/1.0",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = json.load(response)
+    except urllib.error.HTTPError as error:
+        if error.code == 401:
+            raise RuntimeError("Brave 搜索密钥无效，请检查后重试。") from None
+        if error.code == 429:
+            raise RuntimeError("Brave 搜索请求达到当前额度或频率限制。") from None
+        raise RuntimeError(f"网页搜索失败（HTTP {error.code}）。") from None
+    except (urllib.error.URLError, TimeoutError):
+        raise RuntimeError("暂时无法连接 Brave 搜索，请检查网络后重试。") from None
+
+    results = payload.get("web", {}).get("results", [])
+    if not results:
+        print("OpenAgent：我没有搜到合适的网页结果。你可以换个关键词再试一次。")
+        return
+
+    print("OpenAgent：我在网上找到这些页面，先把来源给你；下面是搜索摘要，不是模型核实后的结论：")
+    for index, result in enumerate(results[:count], start=1):
+        title = html.unescape(re.sub(r"<[^>]*>", "", result.get("title", "无标题")))
+        description = html.unescape(re.sub(r"<[^>]*>", "", result.get("description", "")))
+        print(f"\n{index}. {title}")
+        if description:
+            print(f"   摘要：{description}")
+        print(f"   来源：{result.get('url', '')}")
+
+
 parser = argparse.ArgumentParser(description="从本地问答语料中检索相似问题")
 parser.add_argument("--corpus", default="corpus.txt", help="training 目录中的语料文件名")
 parser.add_argument("--threshold", type=float, default=0.42, help="回答所需的最低相似度，范围 0 到 1")
+parser.add_argument("--web", action="store_true", help="本地语料无匹配时，使用 Brave Search 搜索网页")
 args = parser.parse_args()
 
 if not 0.0 <= args.threshold <= 1.0:
@@ -93,6 +139,13 @@ corpus_path = Path(__file__).with_name(args.corpus)
 pairs = load_pairs(corpus_path)
 if not pairs:
     raise ValueError(f"没有从 {corpus_path.name} 中找到相邻的用户/助手问答。")
+
+api_key = None
+if args.web:
+    api_key = os.environ.get("BRAVE_SEARCH_API_KEY") or getpass.getpass("输入 Brave Search API 密钥（输入内容不会显示）：").strip()
+    if not api_key:
+        raise SystemExit("没有输入 API 密钥，联网搜索未启动。")
+    print("联网搜索已开启：本地没有匹配的问题会发送到 Brave Search。请勿输入密码或其他私密信息。")
 
 print(f"已载入 {len(pairs)} 组本地问答。输入 exit 退出。")
 while True:
@@ -108,6 +161,11 @@ while True:
         fallback = conversational_fallback(question)
         if fallback:
             print(f"OpenAgent（陪伴回应，未从语料检索）：{fallback}")
+        elif args.web:
+            try:
+                search_web(question, api_key)
+            except RuntimeError as error:
+                print(f"OpenAgent：{error}")
         else:
             print("OpenAgent：这个问题我现在还没有把握，不想随便编给你。你愿意多说一点背景吗？我可以陪你一起找答案。")
     else:
