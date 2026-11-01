@@ -197,16 +197,12 @@ async function updateTask(task, action, extra = {}) {
   } catch (error) { $('#task-notice').textContent = error.message; }
   finally { taskBusy.delete(task.id); renderTasks(); }
 }
-function selectSettingsTab(preferences) {
-  $('#profile-pane').hidden = preferences; $('#preferences-pane').hidden = !preferences;
-  $('#tab-profile').classList.toggle('selected', !preferences); $('#tab-preferences').classList.toggle('selected', preferences);
-}
-function openSettings(preferences = false) {
+function openSettings() {
   if (!state) return;
   $('#profile-menu').hidden = true; $('#profile-button').setAttribute('aria-expanded','false');
   const profile = state.profile; draftAvatar = profile.avatar;
   $('#name-input').value = profile.name; $('#pet-name-input').value = profile.pet_name; $('#motion-input').checked = profile.pet_motion;
-  paintAvatar($('#avatar-edit'), draftAvatar, profile.name); $('#settings-error').textContent = ''; selectSettingsTab(preferences); $('#settings-dialog').showModal();
+  paintAvatar($('#avatar-edit'), draftAvatar, profile.name); $('#settings-error').textContent = ''; $('#settings-dialog').showModal();
 }
 function closeDrawers() { $('#sidebar').classList.remove('open'); $('#companion-panel').classList.remove('open'); $('#drawer-shade').hidden = true; }
 function openDrawer(id) { closeDrawers(); $(id).classList.add('open'); $('#drawer-shade').hidden = false; }
@@ -241,8 +237,7 @@ $('#task-form').addEventListener('submit', async event => {
 });
 $('#profile-button').addEventListener('click', () => { const menu = $('#profile-menu'); menu.hidden = !menu.hidden; $('#profile-button').setAttribute('aria-expanded',String(!menu.hidden)); });
 document.addEventListener('click', event => { if (!event.target.closest('.sidebar-bottom')) { $('#profile-menu').hidden = true; $('#profile-button').setAttribute('aria-expanded','false'); } });
-$('#edit-profile').addEventListener('click', () => openSettings()); $('#preferences').addEventListener('click', () => openSettings(true));
-$('#tab-profile').addEventListener('click', () => selectSettingsTab(false)); $('#tab-preferences').addEventListener('click', () => selectSettingsTab(true));
+$('#settings').addEventListener('click', openSettings);
 $('#settings-close').addEventListener('click', () => $('#settings-dialog').close());
 $('#settings-form').noValidate = true;
 $('#settings-form').addEventListener('submit', async event => {

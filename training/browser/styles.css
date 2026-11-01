@@ -875,23 +875,10 @@ dialog p {
   line-height:1.9;
   color:#777
 }
-.settings-tabs {
-  display:flex;
-  gap:24px;
-  border-bottom:1px solid #eee;
-  margin-bottom:24px
-}
-.settings-tabs button {
-  font-size:12px;
-  border:0;
-  border-bottom:2px solid transparent;
-  background:none;
-  padding:0 0 12px;
-  color:#888
-}
-.settings-tabs button.selected {
-  border-color:#222;
-  color:#222
+.pet-settings-section {
+  border-top:1px solid #eee;
+  margin-top:24px;
+  padding-top:24px
 }
 .avatar-editor {
   display:flex;
