@@ -1,0 +1,4 @@
+# Browser runtime data belongs in the user's app-data directory.
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm

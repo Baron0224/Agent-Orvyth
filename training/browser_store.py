@@ -1,0 +1,175 @@
+"""浏览器版的本机 SQLite 存储，不写入 Git 仓库。"""
+
+import base64
+from contextlib import contextmanager
+import hashlib
+import json
+from pathlib import Path
+import re
+import secrets
+import sqlite3
+import time
+import uuid
+
+
+class MissingRecord(ValueError):
+    pass
+
+
+class Store:
+    def __init__(self, path):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.connect() as db:
+            db.executescript("""
+                PRAGMA journal_mode=WAL;
+                CREATE TABLE IF NOT EXISTS owners (
+                    id TEXT PRIMARY KEY, profile TEXT NOT NULL, active_chat TEXT);
+                CREATE TABLE IF NOT EXISTS chats (
+                    id TEXT PRIMARY KEY, owner TEXT NOT NULL, title TEXT NOT NULL,
+                    manual_title INTEGER NOT NULL DEFAULT 0, created REAL NOT NULL, updated REAL NOT NULL);
+                CREATE INDEX IF NOT EXISTS chats_owner ON chats(owner, updated);
+                CREATE TABLE IF NOT EXISTS messages (
+                    id INTEGER PRIMARY KEY, chat TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS messages_chat ON messages(chat, id);
+                CREATE TABLE IF NOT EXISTS tasks (
+                    id TEXT PRIMARY KEY, owner TEXT NOT NULL, title TEXT NOT NULL,
+                    done INTEGER NOT NULL DEFAULT 0, created REAL NOT NULL);
+            """)
+
+    @contextmanager
+    def connect(self):
+        db = sqlite3.connect(self.path, timeout=10)
+        db.row_factory = sqlite3.Row
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
+
+    @staticmethod
+    def key(token):
+        return hashlib.sha256(token.encode()).hexdigest()
+
+    def owner(self, token=None, create=False):
+        with self.connect() as db:
+            if token and re.fullmatch(r"[A-Za-z0-9_-]{40,80}", token):
+                owner = self.key(token)
+                if db.execute("SELECT 1 FROM owners WHERE id=?", (owner,)).fetchone():
+                    return token, owner
+            if not create:
+                return None, None
+            token = secrets.token_urlsafe(32)
+            owner = self.key(token)
+            profile = {"name": "我的空间", "avatar": "", "pet_name": "小白", "pet_motion": True}
+            db.execute("INSERT INTO owners(id, profile) VALUES (?,?)", (owner, json.dumps(profile)))
+            chat = self._new_chat(db, owner)
+            db.execute("UPDATE owners SET active_chat=? WHERE id=?", (chat, owner))
+            return token, owner
+
+    def _new_chat(self, db, owner):
+        chat = uuid.uuid4().hex
+        now = time.time()
+        db.execute("INSERT INTO chats(id,owner,title,created,updated) VALUES (?,?,?,?,?)", (chat, owner, "新聊天", now, now))
+        return chat
+
+    def require_chat(self, db, owner, chat):
+        row = db.execute("SELECT * FROM chats WHERE id=? AND owner=?", (chat, owner)).fetchone()
+        if not row:
+            raise MissingRecord("找不到这段聊天，请刷新后重试。")
+        return row
+
+    def state(self, owner):
+        with self.connect() as db:
+            profile = db.execute("SELECT profile, active_chat FROM owners WHERE id=?", (owner,)).fetchone()
+            chats = [dict(row) for row in db.execute("SELECT id,title,created,updated FROM chats WHERE owner=? ORDER BY updated DESC", (owner,))]
+            tasks = [dict(row) for row in db.execute("SELECT id,title,done,created FROM tasks WHERE owner=? ORDER BY created DESC", (owner,))]
+            messages = [dict(row) for row in db.execute("SELECT role,content FROM messages WHERE chat=? ORDER BY id", (profile["active_chat"],))]
+            return {"profile": json.loads(profile["profile"]), "chats": chats, "tasks": tasks,
+                    "active_chat": profile["active_chat"], "messages": messages}
+
+    def history(self, owner, chat):
+        with self.connect() as db:
+            self.require_chat(db, owner, chat)
+            rows = db.execute("SELECT role,content FROM messages WHERE chat=? ORDER BY id DESC LIMIT 16", (chat,)).fetchall()
+            return [dict(row) for row in reversed(rows)]
+
+    def chat_action(self, owner, action, chat=None, title=None):
+        with self.connect() as db:
+            if action == "new":
+                chat = self._new_chat(db, owner)
+            else:
+                self.require_chat(db, owner, chat)
+            if action in {"new", "open"}:
+                db.execute("UPDATE owners SET active_chat=? WHERE id=?", (chat, owner))
+            elif action == "rename":
+                title = self.text(title, 60, "聊天标题")
+                db.execute("UPDATE chats SET title=?,manual_title=1 WHERE id=?", (title, chat))
+            elif action == "clear":
+                db.execute("DELETE FROM messages WHERE chat=?", (chat,))
+                db.execute("UPDATE owners SET active_chat=? WHERE id=?", (chat, owner))
+            elif action == "delete":
+                db.execute("DELETE FROM messages WHERE chat=?", (chat,))
+                db.execute("DELETE FROM chats WHERE id=?", (chat,))
+                active = db.execute("SELECT active_chat FROM owners WHERE id=?", (owner,)).fetchone()[0]
+                if active == chat:
+                    other = db.execute("SELECT id FROM chats WHERE owner=? ORDER BY updated DESC LIMIT 1", (owner,)).fetchone()
+                    replacement = other[0] if other else self._new_chat(db, owner)
+                    db.execute("UPDATE owners SET active_chat=? WHERE id=?", (replacement, owner))
+            else:
+                raise ValueError("未知聊天操作。")
+
+    def save_pair(self, owner, chat, question, answer):
+        with self.connect() as db:
+            row = self.require_chat(db, owner, chat)
+            db.executemany("INSERT INTO messages(chat,role,content) VALUES (?,?,?)", [
+                (chat, "user", question), (chat, "assistant", answer)])
+            title = row["title"]
+            if not row["manual_title"] and title == "新聊天":
+                title = re.sub(r"\s+", " ", question).strip()[:24]
+            db.execute("UPDATE chats SET title=?,updated=? WHERE id=?", (title, time.time(), chat))
+
+    @staticmethod
+    def text(value, limit, label):
+        if not isinstance(value, str) or not value.strip() or len(value.strip()) > limit:
+            raise ValueError(f"{label}请输入 1 到 {limit} 字。")
+        return value.strip()
+
+    def save_profile(self, owner, payload):
+        name = self.text(payload.get("name"), 24, "昵称")
+        pet_name = self.text(payload.get("pet_name"), 16, "精灵名字")
+        avatar = payload.get("avatar", "")
+        motion = payload.get("pet_motion", True)
+        if not isinstance(motion, bool) or not isinstance(avatar, str):
+            raise ValueError("资料格式不正确。")
+        if avatar:
+            prefix = "data:image/png;base64,"
+            try:
+                if not avatar.startswith(prefix):
+                    raise ValueError()
+                decoded = base64.b64decode(avatar[len(prefix):], validate=True)
+                if len(decoded) > 150000 or not decoded.startswith(b"\x89PNG\r\n\x1a\n"):
+                    raise ValueError()
+            except (ValueError, TypeError):
+                raise ValueError("头像请使用不超过 150KB 的 PNG 图片。") from None
+        profile = {"name": name, "pet_name": pet_name, "avatar": avatar, "pet_motion": motion}
+        with self.connect() as db:
+            db.execute("UPDATE owners SET profile=? WHERE id=?", (json.dumps(profile), owner))
+
+    def task_action(self, owner, action, payload):
+        with self.connect() as db:
+            if action == "add":
+                title = self.text(payload.get("title"), 160, "任务")
+                db.execute("INSERT INTO tasks(id,owner,title,created) VALUES (?,?,?,?)", (uuid.uuid4().hex, owner, title, time.time()))
+                return
+            task = payload.get("id")
+            if not db.execute("SELECT 1 FROM tasks WHERE id=? AND owner=?", (task, owner)).fetchone():
+                raise MissingRecord("任务不存在。")
+            if action == "toggle":
+                if not isinstance(payload.get("done"), bool):
+                    raise ValueError("任务状态不正确。")
+                db.execute("UPDATE tasks SET done=? WHERE id=? AND owner=?", (int(payload["done"]), task, owner))
+            elif action == "delete":
+                db.execute("DELETE FROM tasks WHERE id=? AND owner=?", (task, owner))
+            else:
+                raise ValueError("未知任务操作。")

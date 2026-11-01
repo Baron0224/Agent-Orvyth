@@ -1,109 +1,85 @@
-"""仅供本机开发使用的 OpenAgent 浏览器聊天服务。"""
-
+"""本机 OpenAgent：多聊天、个人资料、待办和本地模型流式回答。"""
 import argparse
-from http.cookies import SimpleCookie
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
-import secrets
+import re
+import sqlite3
 import threading
-import time
 import urllib.error
 import urllib.request
 import webbrowser
-
-from chat_local import DEFAULT_MODEL, LocalChat, PRIVACY_NOTICE
-
+from browser_store import MissingRecord, Store
+from chat_local import DEFAULT_MODEL, LocalChat, SYSTEM_PROMPT
 
 ASSETS = Path(__file__).with_name("browser")
-SESSION_TTL = 30 * 60
-
-
-class Session:
-    def __init__(self, model):
-        self.chat = LocalChat(model)
-        self.lock = threading.Lock()
-        self.touched = time.monotonic()
-
+WEB_PRIVACY = (
+    "浏览器版会将成功完成的聊天记录、待办任务、昵称、头像和偏好保存在这台电脑的 OpenAgent 数据库中，"
+    "关闭网页或重启服务后仍会保留。你可以在左侧删除聊天，在任务列表删除任务。"
+    "回答时只把当前问题和有限的本聊天上下文发给本机 Ollama；头像和待办不会自动发给模型。"
+    "这不是云同步，不同浏览器资料由本机 Cookie 区分；清除 Cookie 后会创建新的本机资料，旧数据库记录不会自动搬移。"
+    "这不保证其他软件或操作系统没有日志。"
+)
+WEB_PROMPT = "\n".join(line for line in SYSTEM_PROMPT.splitlines() if not line.startswith((
+    "当前问题和有限的对话历史", "退出本聊天程序", "关于保存或记录对话"))) + "\n" + WEB_PRIVACY
 
 class ChatServer(ThreadingHTTPServer):
     daemon_threads = True
-
-    def __init__(self, port=8765, model=DEFAULT_MODEL):
-        LocalChat(model)  # 在启动时验证本地模型配置。
+    def __init__(self, port=8765, model=DEFAULT_MODEL, db_path=None):
+        LocalChat(model)
+        directory = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / ".local" / "share"))) / "OpenAgent"
+        self.store = Store(db_path or directory / "browser.sqlite3")
+        self.model = model
+        self.generation_lock = threading.Lock()
+        self.chat_locks = {}
+        self.locks_guard = threading.Lock()
         super().__init__(("127.0.0.1", port), Handler)
         self.origin = f"http://127.0.0.1:{self.server_port}"
-        self.model = model
-        self.sessions = {}
-        self.sessions_lock = threading.Lock()
-        self.generation_lock = threading.Lock()
-
-    def session(self, cookie_header, create=False):
-        cookie = SimpleCookie()
-        try:
-            cookie.load(cookie_header or "")
-        except Exception:
-            return None, None
-        value = cookie.get("openagent_session")
-        token = value.value if value else None
-        now = time.monotonic()
-        with self.sessions_lock:
-            for key, session in list(self.sessions.items()):
-                if now - session.touched > SESSION_TTL and not session.lock.locked():
-                    del self.sessions[key]
-            if token in self.sessions:
-                session = self.sessions[token]
-            elif create and len(self.sessions) < 32:
-                token = secrets.token_urlsafe(32)
-                session = self.sessions[token] = Session(self.model)
-            else:
-                return None, None
-            session.touched = now
-            return token, session
-
+    def chat_lock(self, chat):
+        with self.locks_guard:
+            return self.chat_locks.setdefault(chat, threading.Lock())
+    def state(self, owner):
+        return {**self.store.state(owner), "privacy": WEB_PRIVACY}
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
-        pass  # 不在访问日志中输出请求或聊天内容。
-
+        pass
     def headers_for(self, status, content_type, cookie=None):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         if cookie:
-            self.send_header("Set-Cookie", f"openagent_session={cookie}; HttpOnly; SameSite=Strict; Path=/")
-
+            self.send_header("Set-Cookie", f"openagent_session={cookie}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000")
     def json_response(self, status, payload, cookie=None):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.headers_for(status, "application/json; charset=utf-8", cookie)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
-
     def valid_host(self):
         if self.headers.get("Host") != self.server.origin.removeprefix("http://"):
             self.json_response(403, {"error": "请使用终端显示的本机地址打开页面。"})
             return False
         return True
-
+    def owner(self, create=False):
+        cookie = SimpleCookie()
+        try:
+            cookie.load(self.headers.get("Cookie", ""))
+        except CookieError:
+            pass
+        item = cookie.get("openagent_session")
+        return self.server.store.owner(item.value if item else None, create)
     def do_GET(self):
         if not self.valid_host():
             return
         if self.path == "/api/session":
-            token, session = self.server.session(self.headers.get("Cookie"), create=True)
-            if not session:
-                self.json_response(503, {"error": "会话已满，请稍后再试。"})
-                return
-            if not session.lock.acquire(blocking=False):
-                self.json_response(409, {"error": "上一条回复仍在生成，请稍后刷新。"})
-                return
-            try:
-                self.json_response(200, {"messages": session.chat.history, "privacy": PRIVACY_NOTICE}, token)
-            finally:
-                session.lock.release()
+            token, owner = self.owner(create=True)
+            self.json_response(200, self.server.state(owner), token)
             return
         if self.path == "/api/status":
             try:
@@ -125,14 +101,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
-
     def do_POST(self):
         if not self.valid_host():
             return
         if self.headers.get("Origin") != self.server.origin:
             self.json_response(403, {"error": "仅接受本机聊天页面发出的请求。"})
             return
-        if self.path not in {"/api/chat", "/api/clear"}:
+        routes = {"/api/chat", "/api/clear", "/api/profile", "/api/chats/new", "/api/chats/open", "/api/chats/rename", "/api/chats/delete", "/api/tasks/add", "/api/tasks/toggle", "/api/tasks/delete"}
+        if self.path not in routes:
             self.json_response(404, {"error": "接口不存在。"})
             return
         if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
@@ -140,7 +116,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            if not 0 < length <= 16384 or self.headers.get("Transfer-Encoding"):
+            limit = 230000 if self.path == "/api/profile" else 16384
+            if not 0 < length <= limit or self.headers.get("Transfer-Encoding"):
                 raise ValueError()
             payload = json.loads(self.rfile.read(length))
             if not isinstance(payload, dict):
@@ -148,63 +125,87 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, UnicodeDecodeError):
             self.json_response(400, {"error": "请求内容为空、过大或格式不正确。"})
             return
-        _, session = self.server.session(self.headers.get("Cookie"))
-        if session is None:
-            self.json_response(410, {"error": "会话已过期，请刷新页面重新开始。"})
-            return
-        question = payload.get("message")
-        if self.path == "/api/chat" and (not isinstance(question, str) or not question.strip() or len(question) > 2000):
-            self.json_response(400, {"error": "请输入 1 到 2000 字的消息。"})
-            return
-        if not session.lock.acquire(blocking=False):
-            self.json_response(409, {"error": "请等当前回复结束后再操作。"})
+        _, owner = self.owner()
+        if not owner:
+            self.json_response(410, {"error": "本机资料尚未载入，请刷新页面。"})
             return
         try:
-            if self.path == "/api/clear":
-                session.chat.clear()
-                self.json_response(200, {"ok": True})
-                return
-            if not self.server.generation_lock.acquire(blocking=False):
-                self.json_response(503, {"error": "模型正在回答另一条消息，请稍后重试。"})
-                return
-            try:
-                self.headers_for(200, "application/x-ndjson; charset=utf-8")
-                self.end_headers()
-
-                def emit(payload):
-                    self.wfile.write((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
-                    self.wfile.flush()
-
-                stream = session.chat.reply(question.strip())
+            if self.path == "/api/profile":
+                self.server.store.save_profile(owner, payload)
+            elif self.path.startswith("/api/tasks/"):
+                if self.path != "/api/tasks/add" and not isinstance(payload.get("id"), str):
+                    raise ValueError("任务编号不正确。")
+                self.server.store.task_action(owner, self.path.rsplit("/", 1)[1], payload)
+            elif self.path == "/api/chats/new":
+                self.server.store.chat_action(owner, "new")
+            else:
+                chat = payload.get("chat_id")
+                if not isinstance(chat, str) or not re.fullmatch(r"[a-f0-9]{32}", chat):
+                    raise ValueError("聊天编号不正确，请刷新页面。")
+                lock = self.server.chat_lock(chat)
+                if not lock.acquire(blocking=False):
+                    self.json_response(409, {"error": "这段聊天正在回复，请稍后操作。"})
+                    return
                 try:
-                    for content in stream:
-                        emit({"type": "delta", "content": content})
-                    emit({"type": "done"})
-                except (RuntimeError, ValueError) as error:
-                    emit({"type": "error", "message": str(error)})
+                    if self.path == "/api/chat":
+                        self.stream_reply(owner, chat, payload)
+                        return
+                    action = "clear" if self.path == "/api/clear" else self.path.rsplit("/", 1)[1]
+                    self.server.store.chat_action(owner, action, chat, payload.get("title"))
                 finally:
-                    stream.close()
-            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
-                pass
+                    lock.release()
+            self.json_response(200, self.server.state(owner))
+        except MissingRecord as error:
+            self.json_response(404, {"error": str(error)})
+        except ValueError as error:
+            self.json_response(400, {"error": str(error)})
+        except sqlite3.Error:
+            self.json_response(503, {"error": "本机数据暂时无法读写，请稍后重试。"})
+    def stream_reply(self, owner, chat, payload):
+        question = Store.text(payload.get("message"), 2000, "消息")
+        history = self.server.store.history(owner, chat)
+        if not self.server.generation_lock.acquire(blocking=False):
+            self.json_response(503, {"error": "模型正在回答另一条消息，请稍后重试。"})
+            return
+        try:
+            self.headers_for(200, "application/x-ndjson; charset=utf-8")
+            self.end_headers()
+            def emit(data):
+                self.wfile.write((json.dumps(data, ensure_ascii=False) + "\n").encode("utf-8"))
+                self.wfile.flush()
+            local = LocalChat(self.server.model, system_prompt=WEB_PROMPT, privacy_notice=WEB_PRIVACY)
+            local.history = history
+            stream = local.reply(question)
+            answer = []
+            try:
+                for content in stream:
+                    answer.append(content)
+                    emit({"type": "delta", "content": content})
+                self.server.store.save_pair(owner, chat, question, "".join(answer))
+                emit({"type": "done", "chat_id": chat})
+            except (RuntimeError, ValueError, sqlite3.Error) as error:
+                emit({"type": "error", "message": str(error) if not isinstance(error, sqlite3.Error) else "回答未能保存，请稍后重试。"})
             finally:
-                self.server.generation_lock.release()
+                stream.close()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
         finally:
-            session.touched = time.monotonic()
-            session.lock.release()
-
+            self.server.generation_lock.release()
 
 def main():
     parser = argparse.ArgumentParser(description="OpenAgent 本机浏览器聊天")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--data-dir", type=Path, help="指定本机数据目录；默认保存在用户应用数据目录")
     parser.add_argument("--open", action="store_true", help="启动后打开默认浏览器")
     args = parser.parse_args()
     try:
-        server = ChatServer(args.port, args.model)
-    except (OSError, ValueError) as error:
+        server = ChatServer(args.port, args.model, args.data_dir / "browser.sqlite3" if args.data_dir else None)
+    except (OSError, ValueError, sqlite3.Error) as error:
         parser.exit(1, f"无法启动：{error}\n如果页面已经打开，可直接使用；端口被占用时可添加 --port 8766。\n")
     print(f"OpenAgent 已启动：{server.origin}", flush=True)
-    print("保持此窗口开启；按 Ctrl+C 关闭。聊天仅临时保留，当前未联网搜索。", flush=True)
+    print(f"本机记录保存在：{server.store.path}", flush=True)
+    print("保持此窗口开启；按 Ctrl+C 关闭。当前未联网搜索。", flush=True)
     if args.open:
         webbrowser.open(server.origin)
     try:
@@ -213,7 +214,6 @@ def main():
         print("\n已关闭本机聊天服务。")
     finally:
         server.server_close()
-
 
 if __name__ == "__main__":
     main()
