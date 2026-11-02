@@ -1,9 +1,21 @@
 /* Actual WebGL point sprites. The reference is sampled once, never drawn as a background. */
 (() => {
   'use strict';
-  // Optional comparison view; the default welcome layout stays at the bottom.
-  const applyLayout=()=>{document.body.dataset.layout=location.hash==='#center' ? 'center' : 'bottom';};
-  applyLayout();addEventListener('hashchange',applyLayout);
+  // The chosen bottom layout opens with typing, then holds the complete greeting for 3 seconds.
+  const greeting=document.getElementById('welcome-text');
+  const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let welcomeTimer=0,letter=0;
+  const message='Hi Boss';
+  function typeGreeting(){
+    letter=reduceMotion ? message.length : letter+1;
+    greeting.textContent=message.slice(0,letter);
+    greeting.dataset.typing=String(letter<message.length);
+    if(letter<message.length) welcomeTimer=setTimeout(typeGreeting,170);
+    else welcomeTimer=setTimeout(()=>location.replace('/'),3000);
+  }
+  // Independent of WebGL or image loading, so entry still works without graphics support.
+  if(greeting) welcomeTimer=setTimeout(typeGreeting,300);
+  addEventListener('pagehide',()=>clearTimeout(welcomeTimer),{once:true});
   const canvas=document.getElementById('particles');
   const gl=canvas.getContext('webgl',{alpha:true,antialias:false,powerPreference:'high-performance'});
   if(!gl)return;

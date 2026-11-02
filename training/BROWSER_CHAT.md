@@ -71,3 +71,5 @@
 & "training\.venv\Scripts\python.exe" -m unittest discover -s training -p test_chat_web.py -v
 node --check training/browser/app.js
 ```
+
+欢迎页启动：打开 `/start` 后，底部逐字显示 `Hi Boss`，显示完整后停留 3 秒，自动进入聊天首页；也可点击标题提前进入。粒子持续流动。系统减少动态效果时直接显示完整标题再停留 3 秒。
