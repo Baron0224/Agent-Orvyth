@@ -10,7 +10,7 @@
     letter=reduceMotion ? message.length : letter+1;
     greeting.textContent=message.slice(0,letter);
     greeting.dataset.typing=String(letter<message.length);
-    if(letter<message.length) welcomeTimer=setTimeout(typeGreeting,170);
+    if(letter<message.length) welcomeTimer=setTimeout(typeGreeting,320);
     else welcomeTimer=setTimeout(()=>location.replace('/'),3000);
   }
   // Independent of WebGL or image loading, so entry still works without graphics support.

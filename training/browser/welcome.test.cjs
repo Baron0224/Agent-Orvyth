@@ -19,10 +19,10 @@ function preview(reduced=false){
   }};
 }
 test('greeting types progressively even without WebGL, then waits a full 3 seconds',()=>{
-  const p=preview();p.advance(1320);
+  const p=preview();p.advance(2220);
   assert.deepEqual(p.changes.map(c=>c.value),['H','Hi','Hi ','Hi B','Hi Bo','Hi Bos','Hi Boss']);
-  p.advance(4319);assert.equal(p.redirects.length,0);
-  p.advance(4320);assert.deepEqual(p.redirects,[{time:4320,path:'/'}]);
+  p.advance(5219);assert.equal(p.redirects.length,0);
+  p.advance(5220);assert.deepEqual(p.redirects,[{time:5220,path:'/'}]);
 });
 test('reduced motion shows the full greeting and preserves the 3-second hold',()=>{
   const p=preview(true);p.advance(300);assert.deepEqual(p.changes,[{time:300,value:'Hi Boss'}]);
