@@ -101,7 +101,7 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, ValueError, urllib.error.URLError):
                 self.json_response(200, {"ready": False, "message": "请先打开 Ollama，再点检查连接。"})
             return
-        assets = {"/assets/particle-ribbon.png": ("assets/particle-ribbon.png", "image/png"), "/": ("index.html", "text/html"), "/start": ("start.html", "text/html"), "/start.css": ("start.css", "text/css"), "/start.js": ("start.js", "text/javascript"), "/app.js": ("app.js", "text/javascript"), "/styles.css": ("styles.css", "text/css")}
+        assets = {"/particle-field.js": ("particle-field.js", "text/javascript"), "/assets/particle-ribbon.png": ("assets/particle-ribbon.png", "image/png"), "/": ("index.html", "text/html"), "/start": ("start.html", "text/html"), "/start.css": ("start.css", "text/css"), "/start.js": ("start.js", "text/javascript"), "/app.js": ("app.js", "text/javascript"), "/styles.css": ("styles.css", "text/css")}
         if self.path not in assets:
             self.json_response(404, {"error": "页面不存在。"})
             return

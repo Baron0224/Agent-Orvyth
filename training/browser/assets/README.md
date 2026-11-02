@@ -17,4 +17,4 @@ Use case: stylized-concept. Asset type: one production-ready 2x2 sprite sheet fo
 
 Prompt: Remove only the top ORVYTH lettering and bottom Hi Boss lettering, fill with matching dark background, and preserve the original particle ribbon position, bright strands, upper-right coil, density, sharpness, depth, colors, and foreground bokeh. Keep the landscape composition; no new text, buttons or watermark.
 
-Motion is a WebGL texture flow-field distortion with a static image fallback, not a physical 3D particle simulation.
+The image is now only sampled to seed individual particle positions and colors. It is not drawn as a background or uploaded as a deforming texture. The WebGL point renderer updates independent positions and velocities with local cursor forces and spring recovery.
