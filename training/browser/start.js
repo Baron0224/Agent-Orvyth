@@ -5,18 +5,19 @@
   const gl=canvas.getContext('webgl',{alpha:true,antialias:false,powerPreference:'high-performance'});
   if(!gl)return;
   const motion=matchMedia('(prefers-reduced-motion: reduce)');
-  const vs=`attribute vec2 position;attribute vec4 appearance;uniform vec2 viewport;uniform float dpr;varying vec4 ink;
-    void main(){vec2 p=position/viewport*2.-1.;gl_Position=vec4(p.x,-p.y,0.,1.);gl_PointSize=appearance.a*dpr;ink=vec4(appearance.rgb,1.);}`;
+  const vs=`attribute vec2 position;attribute vec4 appearance;attribute float visibility;uniform vec2 viewport;uniform float dpr;varying vec4 ink;
+    void main(){vec2 p=position/viewport*2.-1.;gl_Position=vec4(p.x,-p.y,0.,1.);gl_PointSize=appearance.a*dpr;ink=vec4(appearance.rgb,visibility);}`;
   const fs=`precision mediump float;varying vec4 ink;
     void main(){float r=length(gl_PointCoord-.5)*2.;if(r>1.)discard;
-      float alpha=exp(-r*r*5.)*.85;gl_FragColor=vec4(ink.rgb,alpha);}`;
+      float alpha=exp(-r*r*5.)*.85;gl_FragColor=vec4(ink.rgb,alpha*ink.a);}`;
   function compile(type,code){const s=gl.createShader(type);gl.shaderSource(s,code);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error('shader');return s;}
   let program;
   try{program=gl.createProgram();gl.attachShader(program,compile(gl.VERTEX_SHADER,vs));gl.attachShader(program,compile(gl.FRAGMENT_SHADER,fs));gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw new Error('program');}catch{canvas.hidden=true;return;}
   gl.useProgram(program);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE);
   gl.clearColor(0,0,0,0);
-  const positions=gl.createBuffer(),appearance=gl.createBuffer();
+  const positions=gl.createBuffer(),appearance=gl.createBuffer(),visibility=gl.createBuffer();
   const positionAttr=gl.getAttribLocation(program,'position'),appearanceAttr=gl.getAttribLocation(program,'appearance');
+  const visibilityAttr=gl.getAttribLocation(program,'visibility');
   const viewport=gl.getUniformLocation(program,'viewport'),density=gl.getUniformLocation(program,'dpr');
   let width=0,height=0,dpr=1,field=null,count=0,frame=0,last=0,time=0,lost=false;
   let seed=87;
@@ -56,18 +57,21 @@
       colors[j+2]=Math.min(1,pixels[k+2]/255*1.35+.08);
       colors[j+3]=.8+Math.pow(rand(),4)*3.8;
     }
-    field=new OrvythParticleField(homes,phases,drift);
+    field=new OrvythParticleField(homes,phases,drift,{width,height});
     canvas.dataset.renderer='independent-points';canvas.dataset.particleCount=String(count);
     gl.bindBuffer(gl.ARRAY_BUFFER,appearance);gl.bufferData(gl.ARRAY_BUFFER,colors,gl.STATIC_DRAW);
     gl.enableVertexAttribArray(appearanceAttr);gl.vertexAttribPointer(appearanceAttr,4,gl.FLOAT,false,0,0);
     gl.bindBuffer(gl.ARRAY_BUFFER,positions);gl.bufferData(gl.ARRAY_BUFFER,field.position,gl.DYNAMIC_DRAW);
     gl.enableVertexAttribArray(positionAttr);gl.vertexAttribPointer(positionAttr,2,gl.FLOAT,false,0,0);
+    gl.bindBuffer(gl.ARRAY_BUFFER,visibility);gl.bufferData(gl.ARRAY_BUFFER,field.opacity,gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(visibilityAttr);gl.vertexAttribPointer(visibilityAttr,1,gl.FLOAT,false,0,0);
     draw();
   }
   function draw(){
     if(!field||lost)return;
     gl.clear(gl.COLOR_BUFFER_BIT);gl.uniform2f(viewport,width,height);gl.uniform1f(density,dpr);
     gl.bindBuffer(gl.ARRAY_BUFFER,positions);gl.bufferSubData(gl.ARRAY_BUFFER,0,field.position);
+    gl.bindBuffer(gl.ARRAY_BUFFER,visibility);gl.bufferSubData(gl.ARRAY_BUFFER,0,field.opacity);
     gl.drawArrays(gl.POINTS,0,count);
   }
   function resize(){width=innerWidth;height=innerHeight;dpr=Math.min(devicePixelRatio||1,1.5);canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);gl.viewport(0,0,canvas.width,canvas.height);pointer.radius=Math.min(150,width*.2);build();resume();}

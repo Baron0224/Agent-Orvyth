@@ -36,3 +36,27 @@ test('cursor exactly on a particle and delayed frames remain finite; reset clear
   assert.deepEqual(Array.from(f.position),[20,20]);
   assert.deepEqual(Array.from(f.velocity),[0,0]);
 });
+
+
+test('ribbon particles keep travelling over long distances and recycle without streaking', () => {
+  const homes=[], phases=[], drift=[];
+  for(let i=0;i<300;i++){homes.push(i/299*1200,180+160*Math.sin(i/299*Math.PI));phases.push(i*.7);drift.push(2);}
+  const f=new Field(homes, phases, drift, {width:1200,height:650});
+  const initial=Array.from(f.home);
+  let wrapped=false;
+  for(let i=0;i<3600;i++) {
+    f.step(1/60,i/60,inactive);
+    assert.ok(Array.from(f.position).every(Number.isFinite));
+    assert.ok(Array.from(f.opacity).every(a=>a>=0&&a<=1));
+    if(f.flow.recycled.some(Boolean)) {
+      wrapped=true;
+      for(let k=0;k<phases.length;k++) if(f.flow.recycled[k]) {
+        assert.ok(Math.hypot(f.position[k*2]-f.home[k*2],f.position[k*2+1]-f.home[k*2+1])<3);
+        assert.ok(f.opacity[k]<.01);
+      }
+    }
+    if(i===300) assert.ok(phases.some((_,k)=>Math.hypot(f.home[k*2]-initial[k*2],f.home[k*2+1]-initial[k*2+1])>100));
+  }
+  assert.ok(wrapped);
+  f.reset();assert.deepEqual(Array.from(f.home),initial);
+});
