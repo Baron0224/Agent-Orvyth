@@ -49,7 +49,7 @@
         // Dense wisps, a soft wider cloud, then sparse spray beyond the silhouette.
         this.layer[i]=i%10<5 ? 0 : i%10<9 ? 1 : 2;
         this.wisp[i]=(i%23)/23*Math.PI*2;
-        if(this.layer[i]===0) this.offset[i]=spread*height*.013;
+        if(this.layer[i]===0) this.offset[i]=spread*height*.0025;
         else {
           const gaussian=Math.sqrt(-2*Math.log(Math.max(.0001,secondary)))*Math.cos((spread+1)*Math.PI);
           this.offset[i]=gaussian*height*(this.layer[i]===1 ? .065 : .17);
@@ -106,7 +106,7 @@
       const damping = Math.pow(.86, frames);
       const p = this.position, v = this.velocity, h = this.home;
       for (let i = 0; i < this.phases.length; i++) {
-        const j = i * 2, phase = this.phases[i], drift = this.drift[i];
+        const j = i * 2, phase = this.phases[i], drift = this.drift[i]*(this.flow && this.flow.layer[i]===0 ? .12 : 1);
         if(this.flow && this.flow.recycled[i]) {p[j]=h[j];p[j+1]=h[j+1];v[j]=v[j+1]=0;}
         let ax = (h[j] + Math.sin(time * .65 + phase) * drift - p[j]) * .028;
         let ay = (h[j+1] + Math.cos(time * .51 + phase * 1.7) * drift * .65 - p[j+1]) * .028;
