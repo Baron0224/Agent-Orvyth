@@ -101,7 +101,7 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, ValueError, urllib.error.URLError):
                 self.json_response(200, {"ready": False, "message": "请先打开 Ollama，再点检查连接。"})
             return
-        assets = {"/": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"), "/styles.css": ("styles.css", "text/css")}
+        assets = {"/": ("index.html", "text/html"), "/start": ("start.html", "text/html"), "/start.css": ("start.css", "text/css"), "/start.js": ("start.js", "text/javascript"), "/app.js": ("app.js", "text/javascript"), "/styles.css": ("styles.css", "text/css")}
         if self.path not in assets:
             self.json_response(404, {"error": "页面不存在。"})
             return
@@ -217,7 +217,7 @@ def main():
     print(f"本机记录保存在：{server.store.path}", flush=True)
     print("保持此窗口开启；按 Ctrl+C 关闭。当前未联网搜索。", flush=True)
     if args.open:
-        webbrowser.open(server.origin)
+        webbrowser.open(server.origin + "/start")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
