@@ -42,7 +42,7 @@ function draw(nowMs){
  for(let i=0;i<rig.tailBones.length;i++)rig.tailBones[i].rotation.y=(wag+(motion?Math.sin(now*1.1)*.012:0))*(1-i*.14);
  if(motion&&now>nextBlink){blinkStart=now;nextBlink=now+random(3.5,6.5);}
  const bt=now-blinkStart,blink=motion&&bt>=0&&bt<.2?Math.sin(Math.PI*bt/.2)**2:0;
- rig.eyes.forEach(eye=>{eye.scale.y=.126*(1-.94*blink);});
+ rig.eyes.forEach(eye=>{eye.scale.y=rig.eyeHeight*(1-.94*blink);});
  renderer.render(scene,camera);
  frames++;if(nowMs-frameStart>1000){stage.dataset.fps=String(Math.round(frames*1000/(nowMs-frameStart)));frames=0;frameStart=nowMs;}
  if(motion)frame=requestAnimationFrame(draw);
@@ -54,11 +54,11 @@ try{
  renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setClearColor('#ffffff');renderer.outputColorSpace=T.SRGBColorSpace;
  renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
  renderer.shadowMap.enabled=true;renderer.shadowMap.type=T.PCFSoftShadowMap;
- stage.append(renderer.domElement);scene=new T.Scene();camera=new T.PerspectiveCamera(37,1,.1,50);camera.position.set(0,1.48,5.1);camera.lookAt(0,1.16,0);
+ stage.append(renderer.domElement);scene=new T.Scene();camera=new T.PerspectiveCamera(37,1,.1,50);camera.position.set(-3.2,2.0,5.0);camera.lookAt(0,1.14,-.12);
  scene.add(new T.HemisphereLight('#fff9f1','#9c948b',2.0));
  const key=new T.DirectionalLight('#fff4e5',2.5);key.position.set(-3,6,5);key.castShadow=true;key.shadow.mapSize.set(1024,1024);key.shadow.radius=4;key.shadow.camera.left=-2;key.shadow.camera.right=2;key.shadow.camera.top=4;key.shadow.camera.bottom=-1;key.shadow.normalBias=.03;key.shadow.bias=-.0001;scene.add(key);
  const fill=new T.DirectionalLight('#e5edff',1.4);fill.position.set(4,3,-3);scene.add(fill);
- const ground=new T.Mesh(new T.PlaneGeometry(200,200),new T.ShadowMaterial({opacity:.10}));ground.rotation.x=-Math.PI/2;ground.position.y=-.015;ground.receiveShadow=true;scene.add(ground);
+ const ground=new T.Mesh(new T.PlaneGeometry(200,200),new T.ShadowMaterial({opacity:.10}));ground.rotation.x=-Math.PI/2;ground.position.y=.06;ground.receiveShadow=true;scene.add(ground);
  rig=makeDog();scene.add(rig.dog);
  stage.dataset.mesh='skinned-3d';stage.dataset.activity='rest';stage.dataset.vertices=String(rig.mesh.geometry.attributes.position.count);
  const now=performance.now()/1000;nextIdle=now+4.5;nextBlink=now+2;resize();start();
