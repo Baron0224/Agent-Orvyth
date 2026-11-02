@@ -1,3 +1,15 @@
+# Orvyth
+
+Orvyth 是一个支持本地模型聊天、陪伴互动与待办管理的 AI 项目，原名 OpenAgent。
+
+- [浏览器版启动说明](training/BROWSER_CHAT.md)
+- [终端版启动说明](training/LOCAL_CHAT.md)
+- [项目进度](PROGRESS.md)
+
+当前使用本机 Ollama 和 Qwen3；云端服务尚未部署。仓库同时保留 Dify 源码，以下为其原项目说明及署名。
+
+---
+
 ![cover-v5-optimized](./images/GitHub_README_if.png)
 
 <p align="center">

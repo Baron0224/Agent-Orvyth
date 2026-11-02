@@ -1,4 +1,4 @@
-# OpenAgent 本地模型聊天
+# Orvyth 本地模型聊天
 
 现在也可以使用 [浏览器聊天页面](BROWSER_CHAT.md)，启动 `chat_web.cmd` 即可。下面保留终端聊天入口的说明。
 

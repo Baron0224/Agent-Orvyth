@@ -96,7 +96,7 @@ def search_web(query, api_key, count=5):
         headers={
             "Accept": "application/json",
             "X-Subscription-Token": api_key,
-            "User-Agent": "OpenAgent-local-search/1.0",
+            "User-Agent": "Orvyth-local-search/1.0",
         },
     )
     try:
@@ -113,10 +113,10 @@ def search_web(query, api_key, count=5):
 
     results = payload.get("web", {}).get("results", [])
     if not results:
-        print("OpenAgent：我没有搜到合适的网页结果。你可以换个关键词再试一次。")
+        print("Orvyth：我没有搜到合适的网页结果。你可以换个关键词再试一次。")
         return
 
-    print("OpenAgent：我在网上找到这些页面，先把来源给你；下面是搜索摘要，不是模型核实后的结论：")
+    print("Orvyth：我在网上找到这些页面，先把来源给你；下面是搜索摘要，不是模型核实后的结论：")
     for index, result in enumerate(results[:count], start=1):
         title = html.unescape(re.sub(r"<[^>]*>", "", result.get("title", "无标题")))
         description = html.unescape(re.sub(r"<[^>]*>", "", result.get("description", "")))
@@ -160,16 +160,16 @@ while True:
     if score < args.threshold:
         fallback = conversational_fallback(question)
         if fallback:
-            print(f"OpenAgent（陪伴回应，未从语料检索）：{fallback}")
+            print(f"Orvyth（陪伴回应，未从语料检索）：{fallback}")
         elif args.web:
             try:
                 search_web(question, api_key)
             except RuntimeError as error:
-                print(f"OpenAgent：{error}")
+                print(f"Orvyth：{error}")
         else:
-            print("OpenAgent：这个问题我现在还没有把握，不想随便编给你。你愿意多说一点背景吗？我可以陪你一起找答案。")
+            print("Orvyth：这个问题我现在还没有把握，不想随便编给你。你愿意多说一点背景吗？我可以陪你一起找答案。")
     else:
         warm_intro = "嗯，我陪你一起看看："
         if answer.startswith(warm_intro):
             answer = answer[len(warm_intro) :].lstrip()
-        print(f"OpenAgent（匹配度 {score:.2f}，参考问题：{matched_question}）：{warm_intro}{answer}")
+        print(f"Orvyth（匹配度 {score:.2f}，参考问题：{matched_question}）：{warm_intro}{answer}")
