@@ -1,96 +1,92 @@
-/* Reference-matched ribbon: a clean image plate animated with a WebGL flow field. */
+/* Actual WebGL point sprites. The reference is sampled once, never drawn as a background. */
 (() => {
   'use strict';
-  const canvas = document.getElementById('particles');
-  const motion = matchMedia('(prefers-reduced-motion: reduce)');
-  const gl = canvas.getContext('webgl', {alpha: true, antialias: false, powerPreference: 'low-power'});
-  if (!gl) return; // CSS retains the reference image and the entry link.
-  const vertex = `attribute vec2 position; varying vec2 uv;
-    void main(){uv=position*.5+.5;gl_Position=vec4(position,0.,1.);}`;
-  const fragment = `precision highp float;
-    varying vec2 uv; uniform sampler2D plate; uniform vec2 resolution;
-    uniform float imageAspect; uniform float time; uniform vec2 pointer;
-    void main(){
-      float aspect=resolution.x/resolution.y;
-      vec2 fit=vec2(min(1.,aspect/imageAspect),min(1.,imageAspect/aspect));
-      // Crop to the dense ribbon, so particles extend behind the entire welcome screen.
-      vec2 p=(uv-.5)*fit+.5;
-      p=vec2(.08,.32)+p*vec2(.84,.62);
-      if(p.x<0.||p.x>1.||p.y<0.||p.y>1.){gl_FragColor=vec4(0.,0.,0.,0.);return;}
-      float edge=smoothstep(0.,.12,p.x)*(1.-smoothstep(.88,1.,p.x));
-      float field=smoothstep(.14,.35,p.y)*(1.-smoothstep(.95,1.,p.y))*edge;
-      vec2 broad=vec2(sin(p.y*9.+p.x*3.-time*.24),cos(p.x*7.-p.y*3.+time*.18));
-      vec2 fine=vec2(sin(p.y*23.-p.x*9.+time*.45),cos(p.x*21.+p.y*6.-time*.38));
-      vec2 displacement=(broad*vec2(.021,.036)+fine*.0035)*field;
-      vec2 sampleUV=clamp(p+displacement+pointer*.006*field,vec2(.001),vec2(.999));
-      vec3 color=texture2D(plate,sampleUV).rgb;
-      float light=1.+.045*sin(p.x*16.+p.y*13.-time*.85)*field;
-      gl_FragColor=vec4(color*light,1.);
-    }`;
-  function shader(type, code) {
-    const s=gl.createShader(type); gl.shaderSource(s,code); gl.compileShader(s);
-    if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) throw new Error('Shader unavailable');
-    return s;
-  }
+  const canvas=document.getElementById('particles');
+  const gl=canvas.getContext('webgl',{alpha:true,antialias:false,powerPreference:'high-performance'});
+  if(!gl)return;
+  const motion=matchMedia('(prefers-reduced-motion: reduce)');
+  const vs=`attribute vec2 position;attribute vec4 appearance;uniform vec2 viewport;uniform float dpr;varying vec4 ink;
+    void main(){vec2 p=position/viewport*2.-1.;gl_Position=vec4(p.x,-p.y,0.,1.);gl_PointSize=appearance.a*dpr;ink=vec4(appearance.rgb,1.);}`;
+  const fs=`precision mediump float;varying vec4 ink;
+    void main(){float r=length(gl_PointCoord-.5)*2.;if(r>1.)discard;
+      float alpha=exp(-r*r*5.)*.85;gl_FragColor=vec4(ink.rgb,alpha);}`;
+  function compile(type,code){const s=gl.createShader(type);gl.shaderSource(s,code);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error('shader');return s;}
   let program;
-  try {
-    program=gl.createProgram();
-    gl.attachShader(program,shader(gl.VERTEX_SHADER,vertex));
-    gl.attachShader(program,shader(gl.FRAGMENT_SHADER,fragment));
-    gl.linkProgram(program);
-    if(!gl.getProgramParameter(program,gl.LINK_STATUS)) throw new Error('WebGL unavailable');
-  } catch { canvas.hidden=true; return; }
-  gl.useProgram(program);
-  const buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
-  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);
-  const position=gl.getAttribLocation(program,'position');
-  gl.enableVertexAttribArray(position);gl.vertexAttribPointer(position,2,gl.FLOAT,false,0,0);
-  const uniforms=Object.fromEntries(['resolution','imageAspect','time','pointer','plate'].map(n=>[n,gl.getUniformLocation(program,n)]));
-  const texture=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,texture);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
-  let ready=false,frame=0,last=0,time=0,mouseX=0,mouseY=0,x=0,y=0,lost=false;
+  try{program=gl.createProgram();gl.attachShader(program,compile(gl.VERTEX_SHADER,vs));gl.attachShader(program,compile(gl.FRAGMENT_SHADER,fs));gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw new Error('program');}catch{canvas.hidden=true;return;}
+  gl.useProgram(program);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE);
+  gl.clearColor(0,0,0,0);
+  const positions=gl.createBuffer(),appearance=gl.createBuffer();
+  const positionAttr=gl.getAttribLocation(program,'position'),appearanceAttr=gl.getAttribLocation(program,'appearance');
+  const viewport=gl.getUniformLocation(program,'viewport'),density=gl.getUniformLocation(program,'dpr');
+  let width=0,height=0,dpr=1,field=null,count=0,frame=0,last=0,time=0,lost=false;
+  let seed=87;
+  const rand=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
+  const pointer={x:0,y:0,radius:135,active:false};
   const image=new Image();
-  function render(){
-    if(!ready||lost)return;
-    gl.uniform2f(uniforms.resolution,canvas.width,canvas.height);
-    gl.uniform1f(uniforms.imageAspect,(image.naturalWidth*.84)/(image.naturalHeight*.62));
-    gl.uniform1f(uniforms.time,motion.matches?0:time);
-    gl.uniform2f(uniforms.pointer,motion.matches?0:x,motion.matches?0:y);
-    gl.drawArrays(gl.TRIANGLES,0,6);
+  let loaded=false;
+  function build(){
+    if(!loaded||lost)return;
+    seed=87;
+    const sample=document.createElement('canvas');
+    const ratio=Math.min(1,1000/width,1000/height);
+    sample.width=Math.max(1,Math.round(width*ratio));sample.height=Math.max(1,Math.round(height*ratio));
+    const c=sample.getContext('2d',{willReadFrequently:true});
+    const sx=image.naturalWidth*.08,sy=image.naturalHeight*.06,sw=image.naturalWidth*.84,sh=image.naturalHeight*.62;
+    const scale=Math.max(sample.width/sw,sample.height/sh);
+    c.drawImage(image,sx,sy,sw,sh,(sample.width-sw*scale)/2,(sample.height-sh*scale)/2,sw*scale,sh*scale);
+    const pixels=c.getImageData(0,0,sample.width,sample.height).data;
+    const totalPixels=sample.width*sample.height,cdf=new Float32Array(totalPixels);
+    let total=0;
+    for(let i=0;i<totalPixels;i++){
+      const j=i*4,light=pixels[j]*.2126+pixels[j+1]*.7152+pixels[j+2]*.0722;
+      total+=Math.pow(Math.max(0,light-24),1.35);cdf[i]=total;
+    }
+    if(!total)return;
+    count=width<650?26000:70000;
+    const homes=new Float32Array(count*2),phases=new Float32Array(count),drift=new Float32Array(count),colors=new Float32Array(count*4);
+    for(let i=0;i<count;i++){
+      const target=rand()*total;let lo=0,hi=totalPixels-1;
+      while(lo<hi){const mid=(lo+hi)>>>1;if(cdf[mid]<target)lo=mid+1;else hi=mid;}
+      homes[i*2]=((lo%sample.width)+rand())/sample.width*width;
+      homes[i*2+1]=(Math.floor(lo/sample.width)+rand())/sample.height*height;
+      phases[i]=rand()*Math.PI*2;drift[i]=1+rand()*4;
+      const j=i*4,k=lo*4;
+      colors[j]=Math.min(1,pixels[k]/255*1.35+.08);
+      colors[j+1]=Math.min(1,pixels[k+1]/255*1.35+.08);
+      colors[j+2]=Math.min(1,pixels[k+2]/255*1.35+.08);
+      colors[j+3]=.8+Math.pow(rand(),4)*3.8;
+    }
+    field=new OrvythParticleField(homes,phases,drift);
+    canvas.dataset.renderer='independent-points';canvas.dataset.particleCount=String(count);
+    gl.bindBuffer(gl.ARRAY_BUFFER,appearance);gl.bufferData(gl.ARRAY_BUFFER,colors,gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(appearanceAttr);gl.vertexAttribPointer(appearanceAttr,4,gl.FLOAT,false,0,0);
+    gl.bindBuffer(gl.ARRAY_BUFFER,positions);gl.bufferData(gl.ARRAY_BUFFER,field.position,gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(positionAttr);gl.vertexAttribPointer(positionAttr,2,gl.FLOAT,false,0,0);
+    draw();
   }
-  function resize(){
-    const dpr=Math.min(devicePixelRatio||1,1.5);
-    canvas.width=Math.round(innerWidth*dpr);canvas.height=Math.round(innerHeight*dpr);
-    gl.viewport(0,0,canvas.width,canvas.height);render();
+  function draw(){
+    if(!field||lost)return;
+    gl.clear(gl.COLOR_BUFFER_BIT);gl.uniform2f(viewport,width,height);gl.uniform1f(density,dpr);
+    gl.bindBuffer(gl.ARRAY_BUFFER,positions);gl.bufferSubData(gl.ARRAY_BUFFER,0,field.position);
+    gl.drawArrays(gl.POINTS,0,count);
   }
+  function resize(){width=innerWidth;height=innerHeight;dpr=Math.min(devicePixelRatio||1,1.5);canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);gl.viewport(0,0,canvas.width,canvas.height);pointer.radius=Math.min(150,width*.2);build();resume();}
   function tick(now){
-    frame=0;if(document.hidden||motion.matches||lost||!ready)return;
-    if(last)time+=Math.min((now-last)/1000,.05);last=now;
-    x+=(mouseX-x)*.03;y+=(mouseY-y)*.03;render();
-    frame=requestAnimationFrame(tick);
+    frame=0;if(document.hidden||motion.matches||lost||!field)return;
+    const dt=last?Math.min((now-last)/1000,1/30):1/60;last=now;time+=dt;
+    field.step(dt,time,pointer);draw();frame=requestAnimationFrame(tick);
   }
-  function resume(){
-    cancelAnimationFrame(frame);frame=0;last=0;
-    if(ready&&!document.hidden&&!motion.matches&&!lost)frame=requestAnimationFrame(tick);
-    else render();
-  }
-  image.onload=()=>{
-    if(lost)return;
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);
-    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,image);
-    gl.uniform1i(uniforms.plate,0);ready=true;resize();resume();
-  };
-  image.onerror=()=>{canvas.hidden=true;};
+  function resume(){cancelAnimationFrame(frame);frame=0;last=0;if(motion.matches&&field){field.reset();draw();}else if(field&&!lost&&!document.hidden)frame=requestAnimationFrame(tick);}
+  image.onload=()=>{loaded=true;resize();};
+  image.onerror=()=>{canvas.dataset.renderer='unavailable';};
   image.src='/assets/particle-ribbon.png';
   addEventListener('resize',resize);
-  addEventListener('pointermove',event=>{mouseX=event.clientX/innerWidth-.5;mouseY=.5-event.clientY/innerHeight;});
-  document.addEventListener('pointerleave',()=>{mouseX=mouseY=0;});
-  document.addEventListener('visibilitychange',resume);
+  addEventListener('pointermove',event=>{pointer.x=event.clientX;pointer.y=event.clientY;pointer.active=!motion.matches;});
+  document.addEventListener('pointerleave',()=>{pointer.active=false;});
+  addEventListener('blur',()=>{pointer.active=false;});
+  addEventListener('pointerup',event=>{if(event.pointerType==='touch')pointer.active=false;});
+  document.addEventListener('visibilitychange',()=>{pointer.active=false;resume();});
   motion.addEventListener('change',resume);
   canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();lost=true;cancelAnimationFrame(frame);canvas.hidden=true;});
-  // Context restoration keeps the static plate usable; a page refresh restores animation.
   resize();
 })();

@@ -71,7 +71,7 @@ class WebChatTest(unittest.TestCase):
         self.assertIn('href="/"',html)
         self.assertNotIn('<button',html)
         self.assertNotIn('Set-Cookie',headers)
-        for path in ('/start.css','/start.js'):
+        for path in ('/start.css','/start.js','/particle-field.js'):
             self.assertEqual(self.request('GET',path)[0],200)
         conn=http.client.HTTPConnection('127.0.0.1',self.server.server_port)
         try:
