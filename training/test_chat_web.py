@@ -64,6 +64,15 @@ class WebChatTest(unittest.TestCase):
         self.assertEqual(self.request('POST','/api/chat',{}, {'Content-Type':'text/plain'})[0],415)
         self.assertEqual(self.request('POST','/api/chat',{'chat_id':[],'message':'hi'})[0],400)
         self.assertEqual(self.request('POST','/api/chats/new',{}, {'Cookie':''})[0],410)
+    def test_particle_start_page_is_stateless_and_links_to_chat(self):
+        status, headers, html = self.request('GET','/start')
+        self.assertEqual(status,200)
+        self.assertIn('Hi Boss',html)
+        self.assertIn('href="/"',html)
+        self.assertNotIn('<button',html)
+        self.assertNotIn('Set-Cookie',headers)
+        for path in ('/start.css','/start.js'):
+            self.assertEqual(self.request('GET',path)[0],200)
     def test_new_open_rename_clear_delete(self):
         _,_,events=self.send()
         self.assertEqual(events[-1]['type'],'done')
