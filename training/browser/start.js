@@ -1,125 +1,94 @@
-/* Procedural flowing particles: no video, external asset or network request. */
+/* Reference-matched ribbon: a clean image plate animated with a WebGL flow field. */
 (() => {
   'use strict';
   const canvas = document.getElementById('particles');
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return; // Background and entry link remain usable without Canvas.
   const motion = matchMedia('(prefers-reduced-motion: reduce)');
-  let width = 0, height = 0, points = [], frame = 0, time = 0, last = 0;
-  let pointerX = 0, pointerY = 0, offsetX = 0, offsetY = 0;
-  let seed = 413;
-  const random = () => {
-    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-    return seed / 4294967296;
-  };
-  const sprite = document.createElement('canvas');
-  sprite.width = sprite.height = 32;
-  const glow = sprite.getContext('2d');
-  const gradient = glow.createRadialGradient(16, 16, 0, 16, 16, 16);
-  gradient.addColorStop(0, '#edf8ff');
-  gradient.addColorStop(.15, '#b9dfff');
-  gradient.addColorStop(.4, '#729fc766');
-  gradient.addColorStop(1, '#729fc700');
-  glow.fillStyle = gradient;
-  glow.fillRect(0, 0, 32, 32);
-
-  function resize() {
-    width = innerWidth;
-    height = innerHeight;
-    const dpr = Math.min(devicePixelRatio || 1, 1.75);
-    canvas.width = Math.round(width * dpr);
-    canvas.height = Math.round(height * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    seed = 413;
-    const count = width < 650 ? 2400 : 6200;
-    points = Array.from({length: count}, () => ({
-      u: random(), phase: random() * Math.PI * 2,
-      radius: Math.pow(random(), 2), size: .35 + Math.pow(random(), 5) * 2.1,
-      light: .2 + random() * .8, band: random() > .6 ? 1 : -1,
-    }));
-    render();
+  const gl = canvas.getContext('webgl', {alpha: true, antialias: false, powerPreference: 'low-power'});
+  if (!gl) return; // CSS retains the reference image and the entry link.
+  const vertex = `attribute vec2 position; varying vec2 uv;
+    void main(){uv=position*.5+.5;gl_Position=vec4(position,0.,1.);}`;
+  const fragment = `precision highp float;
+    varying vec2 uv; uniform sampler2D plate; uniform vec2 resolution;
+    uniform float imageAspect; uniform float time; uniform vec2 pointer;
+    void main(){
+      float aspect=resolution.x/resolution.y;
+      vec2 fit=vec2(min(1.,aspect/imageAspect),min(1.,imageAspect/aspect));
+      vec2 p=(uv-.5)*fit+.5;
+      if(p.x<0.||p.x>1.||p.y<0.||p.y>1.){gl_FragColor=vec4(0.,0.,0.,0.);return;}
+      float edge=smoothstep(0.,.12,p.x)*(1.-smoothstep(.88,1.,p.x));
+      float field=smoothstep(.14,.35,p.y)*(1.-smoothstep(.95,1.,p.y))*edge;
+      vec2 broad=vec2(sin(p.y*9.+p.x*3.-time*.24),cos(p.x*7.-p.y*3.+time*.18));
+      vec2 fine=vec2(sin(p.y*23.-p.x*9.+time*.45),cos(p.x*21.+p.y*6.-time*.38));
+      vec2 displacement=(broad*vec2(.021,.036)+fine*.0035)*field;
+      vec2 sampleUV=clamp(p+displacement+pointer*.006*field,vec2(.001),vec2(.999));
+      vec3 color=texture2D(plate,sampleUV).rgb;
+      float light=1.+.045*sin(p.x*16.+p.y*13.-time*.85)*field;
+      gl_FragColor=vec4(color*light,1.);
+    }`;
+  function shader(type, code) {
+    const s=gl.createShader(type); gl.shaderSource(s,code); gl.compileShader(s);
+    if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) throw new Error('Shader unavailable');
+    return s;
   }
-
-  function render() {
-    ctx.clearRect(0, 0, width, height);
-    const scale = Math.min(width * .36, height * .83);
-    const centerY = height * .45;
-    ctx.globalCompositeOperation = 'lighter';
-    // Fine continuous strands give the moving points a readable ribbon shape.
-    for (let strand = 0; strand < 36; strand++) {
-      const band = strand < 18 ? -1 : 1;
-      const phase = strand * 2.399 + time * .14;
-      ctx.beginPath();
-      for (let step = 0; step <= 100; step++) {
-        const u = (step / 100 - .5) * 4.4;
-        const r = .025 + (strand % 18) / 18 * .11;
-        const y = Math.sin(u * 1.55 + time * .16 + band * .65) * .28
-          + Math.cos(phase + u * .9) * r;
-        const z = Math.cos(u * 1.6 + band) * .23 + Math.sin(phase + u * .9) * r;
-        const perspective = 2.5 / (2.5 + z);
-        const px = width / 2 + u * scale * perspective + offsetX * (z + .5);
-        const py = centerY + y * scale * perspective + offsetY * (z + .5);
-        if (!step) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-      }
-      ctx.lineWidth = .5;
-      ctx.strokeStyle = '#91c6ec';
-      ctx.globalAlpha = .06;
-      ctx.stroke();
-    }
-    for (const point of points) {
-      // The fade at either edge hides wraparound; the flow has no timed ending.
-      const progress = (point.u + time * .025) % 1;
-      const u = (progress - .5) * 4.4;
-      const phase = point.phase + time * .14 + u * .9;
-      const radius = .035 + point.radius * (.15 + .13 * (1 + Math.sin(u * 1.8)));
-      const x = u;
-      const y = Math.sin(u * 1.55 + time * .16 + point.band * .65) * .28
-        + Math.cos(phase) * radius;
-      const z = Math.cos(u * 1.6 + point.band) * .23 + Math.sin(phase) * radius;
-      const perspective = 2.5 / (2.5 + z);
-      const px = width / 2 + x * scale * perspective + offsetX * (z + .5);
-      const py = centerY + y * scale * perspective + offsetY * (z + .5);
-      const fade = Math.min(1, progress * 9, (1 - progress) * 9);
-      const size = point.size * perspective;
-      ctx.globalAlpha = fade * point.light * (.45 + .35 * perspective);
-      if (size > 1.1) {
-        const diameter = size * 5;
-        ctx.drawImage(sprite, px - diameter / 2, py - diameter / 2, diameter, diameter);
-      } else {
-        ctx.fillStyle = '#b9d6ec';
-        ctx.fillRect(px, py, size, size);
-      }
-    }
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = 'source-over';
+  let program;
+  try {
+    program=gl.createProgram();
+    gl.attachShader(program,shader(gl.VERTEX_SHADER,vertex));
+    gl.attachShader(program,shader(gl.FRAGMENT_SHADER,fragment));
+    gl.linkProgram(program);
+    if(!gl.getProgramParameter(program,gl.LINK_STATUS)) throw new Error('WebGL unavailable');
+  } catch { canvas.hidden=true; return; }
+  gl.useProgram(program);
+  const buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);
+  const position=gl.getAttribLocation(program,'position');
+  gl.enableVertexAttribArray(position);gl.vertexAttribPointer(position,2,gl.FLOAT,false,0,0);
+  const uniforms=Object.fromEntries(['resolution','imageAspect','time','pointer','plate'].map(n=>[n,gl.getUniformLocation(program,n)]));
+  const texture=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,texture);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  let ready=false,frame=0,last=0,time=0,mouseX=0,mouseY=0,x=0,y=0,lost=false;
+  const image=new Image();
+  function render(){
+    if(!ready||lost)return;
+    gl.uniform2f(uniforms.resolution,canvas.width,canvas.height);
+    gl.uniform1f(uniforms.imageAspect,image.naturalWidth/image.naturalHeight);
+    gl.uniform1f(uniforms.time,motion.matches?0:time);
+    gl.uniform2f(uniforms.pointer,motion.matches?0:x,motion.matches?0:y);
+    gl.drawArrays(gl.TRIANGLES,0,6);
   }
-
-  function tick(now) {
-    frame = 0;
-    if (document.hidden || motion.matches) return;
-    if (last) time += Math.min((now - last) / 1000, .05);
-    last = now;
-    offsetX += (pointerX - offsetX) * .035;
-    offsetY += (pointerY - offsetY) * .035;
-    render();
-    frame = requestAnimationFrame(tick);
+  function resize(){
+    const dpr=Math.min(devicePixelRatio||1,1.5);
+    canvas.width=Math.round(innerWidth*dpr);canvas.height=Math.round(innerHeight*dpr);
+    gl.viewport(0,0,canvas.width,canvas.height);render();
   }
-  function resume() {
-    cancelAnimationFrame(frame);
-    frame = 0;
-    last = 0;
-    if (!document.hidden && !motion.matches) frame = requestAnimationFrame(tick);
+  function tick(now){
+    frame=0;if(document.hidden||motion.matches||lost||!ready)return;
+    if(last)time+=Math.min((now-last)/1000,.05);last=now;
+    x+=(mouseX-x)*.03;y+=(mouseY-y)*.03;render();
+    frame=requestAnimationFrame(tick);
+  }
+  function resume(){
+    cancelAnimationFrame(frame);frame=0;last=0;
+    if(ready&&!document.hidden&&!motion.matches&&!lost)frame=requestAnimationFrame(tick);
     else render();
   }
-  addEventListener('resize', resize);
-  addEventListener('pointermove', event => {
-    if (motion.matches) return;
-    pointerX = (event.clientX / width - .5) * 35;
-    pointerY = (event.clientY / height - .5) * 25;
-  });
-  document.addEventListener('pointerleave', () => { pointerX = pointerY = 0; });
-  document.addEventListener('visibilitychange', resume);
-  motion.addEventListener('change', resume);
+  image.onload=()=>{
+    if(lost)return;
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,image);
+    gl.uniform1i(uniforms.plate,0);ready=true;resize();resume();
+  };
+  image.onerror=()=>{canvas.hidden=true;};
+  image.src='/assets/particle-ribbon.png';
+  addEventListener('resize',resize);
+  addEventListener('pointermove',event=>{mouseX=event.clientX/innerWidth-.5;mouseY=.5-event.clientY/innerHeight;});
+  document.addEventListener('pointerleave',()=>{mouseX=mouseY=0;});
+  document.addEventListener('visibilitychange',resume);
+  motion.addEventListener('change',resume);
+  canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();lost=true;cancelAnimationFrame(frame);canvas.hidden=true;});
+  // Context restoration keeps the static plate usable; a page refresh restores animation.
   resize();
-  resume();
 })();

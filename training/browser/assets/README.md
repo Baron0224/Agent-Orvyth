@@ -9,3 +9,12 @@
 ## 最终生成提示词
 
 Use case: stylized-concept. Asset type: one production-ready 2x2 sprite sheet for an interactive desktop companion in a white chat app. Create an original extremely cute, colorful tiny flame-spirit mascot: oversized round creamy face, big glossy cocoa eyes, peach-pink blush, a soft golden yellow and tangerine-orange flame-shaped hood/hair with a tiny warm highlight, little plump orange body with cream belly, tiny mitten paws and rounded feet, a small turquoise scarf. Cozy premium chibi game pet / lovingly painted 2D kawaii sticker art with soft volume, clean silhouette, delicate warm outlines, charming expression, polished and readable at 160 pixels. Not a monochrome ghost, not wireframe, not a logo. Transparent background. Exactly four equal square cells in a 2 by 2 grid, no grid lines, no borders, no text, no watermarks, no UI. Each cell contains exactly the same full-body character at identical size and aligned center and ground baseline, comfortably inside its own cell with 12 percent transparent padding. Upper left: idle with open eyes and gentle happy smile, relaxed arms. Upper right: delighted affectionate wink with one paw waving. Lower left: thinking with curious head tilt and a paw resting on cheek. Lower right: speaking with a cheerful small open-mouth smile and tiny gesturing paws. Keep character identity, costume, lighting, proportions and color palette strictly consistent in all four cells. No detached decorative objects between cells, no background, no ground shadows.
+
+
+## Particle ribbon welcome background
+
+`particle-ribbon.png` is a clean background plate made with the built-in image_gen tool on 2026-11-02. Reference: the user-selected flowing particle concept, originally generated in this conversation. Used by `/start`; text is rendered separately by HTML.
+
+Prompt: Remove only the top ORVYTH lettering and bottom Hi Boss lettering, fill with matching dark background, and preserve the original particle ribbon position, bright strands, upper-right coil, density, sharpness, depth, colors, and foreground bokeh. Keep the landscape composition; no new text, buttons or watermark.
+
+Motion is a WebGL texture flow-field distortion with a static image fallback, not a physical 3D particle simulation.

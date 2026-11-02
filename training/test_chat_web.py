@@ -73,6 +73,15 @@ class WebChatTest(unittest.TestCase):
         self.assertNotIn('Set-Cookie',headers)
         for path in ('/start.css','/start.js'):
             self.assertEqual(self.request('GET',path)[0],200)
+        conn=http.client.HTTPConnection('127.0.0.1',self.server.server_port)
+        try:
+            conn.request('GET','/assets/particle-ribbon.png')
+            response=conn.getresponse()
+            self.assertEqual(response.status,200)
+            self.assertEqual(response.getheader('Content-Type'),'image/png')
+            self.assertTrue(response.read().startswith(b'\x89PNG\r\n\x1a\n'))
+        finally:
+            conn.close()
     def test_new_open_rename_clear_delete(self):
         _,_,events=self.send()
         self.assertEqual(events[-1]['type'],'done')

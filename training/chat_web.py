@@ -101,13 +101,13 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, ValueError, urllib.error.URLError):
                 self.json_response(200, {"ready": False, "message": "请先打开 Ollama，再点检查连接。"})
             return
-        assets = {"/": ("index.html", "text/html"), "/start": ("start.html", "text/html"), "/start.css": ("start.css", "text/css"), "/start.js": ("start.js", "text/javascript"), "/app.js": ("app.js", "text/javascript"), "/styles.css": ("styles.css", "text/css")}
+        assets = {"/assets/particle-ribbon.png": ("assets/particle-ribbon.png", "image/png"), "/": ("index.html", "text/html"), "/start": ("start.html", "text/html"), "/start.css": ("start.css", "text/css"), "/start.js": ("start.js", "text/javascript"), "/app.js": ("app.js", "text/javascript"), "/styles.css": ("styles.css", "text/css")}
         if self.path not in assets:
             self.json_response(404, {"error": "页面不存在。"})
             return
         filename, content_type = assets[self.path]
         body = (ASSETS / filename).read_bytes()
-        self.headers_for(200, content_type + "; charset=utf-8")
+        self.headers_for(200, content_type if content_type.startswith("image/") else content_type + "; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
