@@ -1,4 +1,4 @@
-"""本机 OpenAgent：多聊天、个人资料、待办和本地模型流式回答。"""
+"""本机 Orvyth：多聊天、个人资料、待办和本地模型流式回答。"""
 import argparse
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -15,8 +15,14 @@ from browser_store import MissingRecord, Store
 from chat_local import DEFAULT_MODEL, LocalChat, SYSTEM_PROMPT
 
 ASSETS = Path(__file__).with_name("browser")
+
+def default_database_path():
+    base = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / ".local" / "share")))
+    legacy = base / "OpenAgent" / "browser.sqlite3"
+    return legacy if legacy.exists() else base / "Orvyth" / "browser.sqlite3"
+
 WEB_PRIVACY = (
-    "浏览器版会将成功完成的聊天记录、待办任务、昵称、头像和偏好保存在这台电脑的 OpenAgent 数据库中，"
+    "浏览器版会将成功完成的聊天记录、待办任务、昵称、头像和偏好保存在这台电脑的 Orvyth 数据库中，"
     "关闭网页或重启服务后仍会保留。你可以在左侧删除聊天，在任务列表删除任务。"
     "回答时只把当前问题和有限的本聊天上下文发给本机 Ollama；头像和待办不会自动发给模型。"
     "这不是云同步，不同浏览器资料由本机 Cookie 区分；清除 Cookie 后会创建新的本机资料，旧数据库记录不会自动搬移。"
@@ -29,8 +35,7 @@ class ChatServer(ThreadingHTTPServer):
     daemon_threads = True
     def __init__(self, port=8765, model=DEFAULT_MODEL, db_path=None):
         LocalChat(model)
-        directory = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / ".local" / "share"))) / "OpenAgent"
-        self.store = Store(db_path or directory / "browser.sqlite3")
+        self.store = Store(db_path or default_database_path())
         self.model = model
         self.generation_lock = threading.Lock()
         self.chat_locks = {}
@@ -54,7 +59,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         if cookie:
-            self.send_header("Set-Cookie", f"openagent_session={cookie}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000")
+            self.send_header("Set-Cookie", f"orvyth_session={cookie}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000")
     def json_response(self, status, payload, cookie=None):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.headers_for(status, "application/json; charset=utf-8", cookie)
@@ -72,8 +77,13 @@ class Handler(BaseHTTPRequestHandler):
             cookie.load(self.headers.get("Cookie", ""))
         except CookieError:
             pass
-        item = cookie.get("openagent_session")
-        return self.server.store.owner(item.value if item else None, create)
+        for name in ("orvyth_session", "openagent_session"):
+            item = cookie.get(name)
+            if item:
+                token, owner = self.server.store.owner(item.value, False)
+                if owner:
+                    return token, owner
+        return self.server.store.owner(None, create)
     def do_GET(self):
         if not self.valid_host():
             return
@@ -193,7 +203,7 @@ class Handler(BaseHTTPRequestHandler):
             self.server.generation_lock.release()
 
 def main():
-    parser = argparse.ArgumentParser(description="OpenAgent 本机浏览器聊天")
+    parser = argparse.ArgumentParser(description="Orvyth 本机浏览器聊天")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--data-dir", type=Path, help="指定本机数据目录；默认保存在用户应用数据目录")
@@ -203,7 +213,7 @@ def main():
         server = ChatServer(args.port, args.model, args.data_dir / "browser.sqlite3" if args.data_dir else None)
     except (OSError, ValueError, sqlite3.Error) as error:
         parser.exit(1, f"无法启动：{error}\n如果页面已经打开，可直接使用；端口被占用时可添加 --port 8766。\n")
-    print(f"OpenAgent 已启动：{server.origin}", flush=True)
+    print(f"Orvyth 已启动：{server.origin}", flush=True)
     print(f"本机记录保存在：{server.store.path}", flush=True)
     print("保持此窗口开启；按 Ctrl+C 关闭。当前未联网搜索。", flush=True)
     if args.open:

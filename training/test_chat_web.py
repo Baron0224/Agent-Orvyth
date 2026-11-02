@@ -137,4 +137,20 @@ class WebChatTest(unittest.TestCase):
             self.assertEqual(''.join(LocalChat().reply('/privacy')),PRIVACY_NOTICE)
         self.assertNotIn('退出本聊天程序会丢失',WEB_PROMPT)
         self.assertIn('数据库',self.state()['privacy'])
+    def test_legacy_cookie_keeps_existing_profile_after_rename(self):
+        self.send('旧版本保存的消息')
+        legacy_cookie = 'openagent_session=' + self.cookie.split('=',1)[1]
+        status, headers, data = self.request('GET','/api/session',extra={'Cookie':legacy_cookie})
+        self.assertEqual(status,200)
+        self.assertEqual(data['active_chat'],self.chat)
+        self.assertEqual(data['messages'][0]['content'],'旧版本保存的消息')
+        self.assertTrue(headers['Set-Cookie'].startswith('orvyth_session='))
+    def test_default_data_path_keeps_legacy_database(self):
+        from chat_web import default_database_path
+        with tempfile.TemporaryDirectory() as folder, patch.dict('os.environ',{'LOCALAPPDATA':folder}):
+            root=Path(folder)
+            self.assertEqual(default_database_path(),root/'Orvyth'/'browser.sqlite3')
+            legacy=root/'OpenAgent'/'browser.sqlite3'
+            legacy.parent.mkdir(); legacy.touch()
+            self.assertEqual(default_database_path(),legacy)
 if __name__=='__main__': unittest.main()

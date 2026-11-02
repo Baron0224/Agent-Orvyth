@@ -38,7 +38,7 @@ function addMessage(role, text = '') {
   if (role === 'user') paintAvatar(avatar, state?.profile.avatar, state?.profile.name);
   else avatar.textContent = 'o';
   const name = document.createElement('span');
-  name.textContent = role === 'user' ? (state?.profile.name === '我的空间' ? '你' : state?.profile.name || '你') : 'OpenAgent';
+  name.textContent = role === 'user' ? (state?.profile.name === '我的空间' ? '你' : state?.profile.name || '你') : 'Orvyth';
   label.append(avatar, name);
   const body = document.createElement('div'); body.className = 'body'; body.textContent = text;
   entry.append(label, body); messages.append(entry); return {entry, body};

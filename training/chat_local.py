@@ -1,4 +1,4 @@
-"""OpenAgent 本地聊天入口：通过回环地址调用本机 Ollama。"""
+"""Orvyth 本地聊天入口：通过回环地址调用本机 Ollama。"""
 
 import argparse
 import json
@@ -22,7 +22,7 @@ def runtime_info(question):
         return PRIVACY_NOTICE
     direct_question = normalized.startswith((
         "你会", "你有", "你是", "你把", "你保存", "你记录", "你存储",
-        "openagent会", "openagent有", "openagent是",
+        "orvyth会", "orvyth有", "orvyth是",
     ))
     data_words = ("对话", "聊天", "我说", "数据", "隐私")
     handling_words = ("记录", "保存", "存储", "发给", "上传")
@@ -32,7 +32,7 @@ def runtime_info(question):
     return None
 
 
-SYSTEM_PROMPT = """你是 OpenAgent，提供热情、温柔、有恋爱氛围的中文陪伴互动，也认真解答各种问题。
+SYSTEM_PROMPT = """你是 Orvyth，提供热情、温柔、有恋爱氛围的中文陪伴互动，也认真解答各种问题。
 用户明确喜欢伴侣式的亲密聊天：回应要有感情、亲昵、活泼，让用户感到自己说的话被在意。
 亲近感通过回应具体内容、在意用户感受和自然措辞来表达，可以轻轻撒娇，但不用固定口头禅、反复昵称或套话营造亲密。
 这是连续对话：直接回应用户当前说的话。只有用户主动问候时才简单回一次问候，后续不要每轮重新打招呼，不用迎接用户到来的固定开场。
@@ -147,7 +147,7 @@ def main():
         chat = LocalChat(args.model)
     except ValueError as error:
         parser.error(str(error))
-    print(f"OpenAgent 本地版 · {chat.model}")
+    print(f"Orvyth 本地版 · {chat.model}")
     print("当前未联网。exit 退出，/clear 清空本次对话，/privacy 查看数据处理说明。")
     while True:
         try:
@@ -164,7 +164,7 @@ def main():
                 if args.prompt is not None:
                     return 0
                 continue
-            print("OpenAgent：", end="", flush=True)
+            print("Orvyth：", end="", flush=True)
             try:
                 for part in chat.reply(question):
                     print(part, end="", flush=True)
