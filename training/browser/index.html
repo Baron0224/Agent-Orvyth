@@ -4,6 +4,19 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Orvyth · 我的空间</title><link rel="icon" href="data:,">
   <link rel="stylesheet" href="/styles.css"><script src="/app.js" defer></script>
+  <!-- welcome-arrival:start -->
+  <style>
+    html.welcome-arrival::after{content:"";position:fixed;inset:0;z-index:2147483647;background:#f8fafc;pointer-events:none;animation:welcomeArrival .9s ease-out both}
+    @keyframes welcomeArrival{from{opacity:1}to{opacity:0}}
+    @media(prefers-reduced-motion:reduce){html.welcome-arrival::after{animation-duration:.2s}}
+  </style>
+  <script>
+    try{if(sessionStorage.getItem('orvyth-welcome-arrival')==='1'){
+      sessionStorage.removeItem('orvyth-welcome-arrival');document.documentElement.classList.add('welcome-arrival');
+      setTimeout(()=>document.documentElement.classList.remove('welcome-arrival'),1000);
+    }}catch{}
+  </script>
+  <!-- welcome-arrival:end -->
 </head>
 <body>
   <div id="drawer-shade" hidden></div>

@@ -5,3 +5,11 @@
 #welcome-text[data-typing="true"]::after{content:"";display:inline-block;height:.8em;margin-left:.08em;border-right:1px solid currentColor;animation:caret .8s steps(1) infinite}
 @keyframes caret{50%{opacity:0}}
 @media(prefers-reduced-motion:reduce){#welcome-text::after{animation:none}}
+
+/* Focus on one live particle, expand its halo, then hand off on a pale frame. */
+body[data-entering="true"] canvas{transform-origin:var(--focus-x) var(--focus-y);transform:scale(2.8);opacity:.35;transition:transform 1.8s cubic-bezier(.4,0,.2,1),opacity 1.8s ease}
+header,main{transition:opacity .6s ease}
+body[data-entering="true"] header,body[data-entering="true"] main{opacity:0;pointer-events:none}
+#particle-portal{position:fixed;z-index:6;width:6px;height:6px;border-radius:50%;pointer-events:none;background:radial-gradient(circle closest-side,#f8fafc 0%,#f8fafc 60%,#e1f0ffde 77%,#a9d3ff45 90%,transparent 100%);animation:particlePortal 1.8s cubic-bezier(.4,0,.2,1) forwards;will-change:transform,opacity}
+@keyframes particlePortal{0%{transform:translate(-50%,-50%) scale(1);opacity:0}12%{opacity:1}100%{transform:translate(-50%,-50%) scale(var(--cover-scale));opacity:1}}
+@media(prefers-reduced-motion:reduce){body[data-entering="true"] canvas{transform:none;transition:opacity .25s}#particle-portal{animation-duration:.25s}header,main{transition-duration:.25s}}
