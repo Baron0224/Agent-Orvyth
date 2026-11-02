@@ -6,23 +6,18 @@ const union=(a,b,k=.15)=>{const h=Math.max(k-Math.abs(a-b),0)/k;return Math.min(
 const shapes=[
  [0,.91,-.25,.53,.65,.69], [0,1.39,.12,.42,.49,.40], [0,1.70,.16,.49,.54,.43],
  [-.105,1.58,.585,.15,.14,.12],[.105,1.58,.585,.15,.14,.12],
- [-.31,.26,.24,.15,.30,.16],[.31,.26,.24,.15,.30,.16],
- [-.33,.26,-.65,.16,.30,.18],[.33,.26,-.65,.16,.30,.18],
+ [-.29,.26,.20,.18,.28,.20],[.29,.26,.20,.18,.28,.20],
+ [-.32,.26,-.58,.18,.28,.20],[.32,.26,-.58,.18,.28,.20],
  [-.31,2.08,.12,.15,.28,.12],[.31,2.08,.12,.15,.28,.12]
 ];
 function field(x,y,z){
  let d=100;
  for(let i=0;i<shapes.length;i++){
   const [cx,cy,cz,rx,ry,rz]=shapes[i],u=(y-cy)/ry;
-  if(i>=5&&i<=8){
-   const qx=Math.abs(x-cx)-.06,qy=Math.abs(y-.30)-.14,qz=Math.abs(z-cz)-.075;
-   const foot=Math.hypot(Math.max(qx,0),Math.max(qy,0),Math.max(qz,0))+Math.min(Math.max(qx,qy,qz),0)-.095;
-   d=union(d,foot,.10);continue;
-  }
   // Taper the ears toward a rounded tip, with wider lower cheeks.
   const width=i>=9?rx*Math.max(.22,1-.45*Math.max(0,u)):rx;
   const e=(Math.hypot((x-cx)/width,u,(z-cz)/rz)-1)*Math.min(width,ry,rz);
-  d=union(d,e,i>=9?.07:.13);
+  d=union(d,e,i>=9?.07:(i>=5?.19:.13));
  }
  return d;
 }
@@ -45,7 +40,7 @@ function makeSurface(){
   const [x,y,z]=p,e=.002;
   const n=new T.Vector3(field(x+e,y,z)-field(x-e,y,z),field(x,y+e,z)-field(x,y-e,z),field(x,y,z+e)-field(x,y,z-e)).normalize();
   pos.push(x,y,z);norm.push(n.x,n.y,n.z);const c=colorAt(x,y,z);colors.push(c.r,c.g,c.b);
-  const h=smooth(1.40,1.82,y),nWeight=smooth(1.0,1.5,y)*(1-h),sWeight=smooth(.24,.85,y)*(1-h-nWeight);
+  const h=smooth(1.15,1.46,y),nWeight=smooth(1.0,1.5,y)*(1-h),sWeight=smooth(.24,.85,y)*(1-h-nWeight);
   skin.push(0,1,2,3);weights.push(1-h-nWeight-sWeight,sWeight,nWeight,h);
  }
  function triangle(a,b,c){

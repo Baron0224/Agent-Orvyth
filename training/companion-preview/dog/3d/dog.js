@@ -18,7 +18,7 @@ function draw(nowMs){
  const now=nowMs/1000,dt=lastTime?Math.min(now-lastTime,.05):1/60;lastTime=now;
  const quiet=now-lastInput>3.5,motion=!reduced.matches;
  if(motion&&!action&&quiet&&now>nextIdle){action=['look','sniff','stretch','wag'][Math.floor(Math.random()*4)];actionStart=now;stage.dataset.activity=action;}
- let yaw=!quiet?pointer.x*.65:0,pitch=!quiet?pointer.y*.28:0,tilt=0,wag=0,lean=0;
+ let yaw=!quiet?pointer.x*.40:0,pitch=!quiet?pointer.y*.18:0,tilt=0,wag=0,lean=0;
  const breath=motion?Math.sin(now*1.65):0;
  if(action&&motion){
   const t=now-actionStart,duration=action==='pat'?3.0:4;
@@ -26,9 +26,9 @@ function draw(nowMs){
   else{
    const env=Math.sin(Math.PI*t/duration)**2;
    if(action==='pat'){tilt=Math.sin(t*2)*.12*env;wag=Math.sin(t*9)*.23*env;pitch=-.08*env;}
-   if(action==='look'){yaw=.45*Math.sin(t*1.2)*env;tilt=.12*env;}
-   if(action==='sniff'){pitch=.29*env;lean=.035*env;}
-   if(action==='stretch'){pitch=-.21*env;lean=-.035*env;}
+   if(action==='look'){yaw=.30*Math.sin(t*1.2)*env;tilt=.12*env;}
+   if(action==='sniff'){pitch=.18*env;lean=.035*env;}
+   if(action==='stretch'){pitch=-.14*env;lean=-.035*env;}
    if(action==='wag')wag=Math.sin(t*6)*.2*env;
    if(action!=='pat')message(({look:'自己看看周围',sniff:'低头闻一闻',stretch:'轻轻抬头伸展',wag:'摇摇尾巴'})[action]);
   }
@@ -54,11 +54,11 @@ try{
  renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setClearColor('#ffffff');renderer.outputColorSpace=T.SRGBColorSpace;
  renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
  renderer.shadowMap.enabled=true;renderer.shadowMap.type=T.PCFSoftShadowMap;
- stage.append(renderer.domElement);scene=new T.Scene();camera=new T.PerspectiveCamera(37,1,.1,50);camera.position.set(-3.2,2.0,5.0);camera.lookAt(0,1.14,-.12);
+ stage.append(renderer.domElement);scene=new T.Scene();camera=new T.PerspectiveCamera(37,1,.1,50);camera.position.set(0,1.65,6.1);camera.lookAt(0,1.14,-.12);
  scene.add(new T.HemisphereLight('#fff9f1','#9c948b',2.0));
  const key=new T.DirectionalLight('#fff4e5',2.5);key.position.set(-3,6,5);key.castShadow=true;key.shadow.mapSize.set(1024,1024);key.shadow.radius=4;key.shadow.camera.left=-2;key.shadow.camera.right=2;key.shadow.camera.top=4;key.shadow.camera.bottom=-1;key.shadow.normalBias=.03;key.shadow.bias=-.0001;scene.add(key);
  const fill=new T.DirectionalLight('#e5edff',1.4);fill.position.set(4,3,-3);scene.add(fill);
- const ground=new T.Mesh(new T.PlaneGeometry(200,200),new T.ShadowMaterial({opacity:.10}));ground.rotation.x=-Math.PI/2;ground.position.y=.06;ground.receiveShadow=true;scene.add(ground);
+ const ground=new T.Mesh(new T.PlaneGeometry(200,200),new T.ShadowMaterial({opacity:.10}));ground.rotation.x=-Math.PI/2;ground.position.y=-.015;ground.receiveShadow=true;scene.add(ground);
  rig=makeDog();scene.add(rig.dog);
  stage.dataset.mesh='skinned-3d';stage.dataset.activity='rest';stage.dataset.vertices=String(rig.mesh.geometry.attributes.position.count);
  const now=performance.now()/1000;nextIdle=now+4.5;nextBlink=now+2;resize();start();
