@@ -7,17 +7,26 @@
       // Paths follow the marked upper sweep, lower return and inner curl.
       // Open endpoints sit beyond the viewport; no visible branch fades out midway.
       const curves = [
-        [[-.18,.16],[.12,.29],[.40,.55],[.63,.58],
-         [.83,.67],[1.04,.20],[.91,.11],
-         [.82,-.01],[.61,.34],[.43,.49],
-         [.24,.29],[.02,.48],[-.18,.76]],
-        [[-.18,.76],[.06,.43],[.22,.33],[.30,.43],
-         [.28,.68],[.39,.89],[.57,.88],
-         [.77,.94],[.74,.48],[.83,.48],
-         [.98,.42],[1.02,.61],[1.18,.72]],
-        [[1.18,.36],[.99,.28],[.97,.50],[.77,.48],
-         [.93,.14],[.73,.38],[.48,.48],
-         [.29,.55],[.06,.47],[-.18,.39]],
+        // Main: left inlet through the central stream and inner curl to the right.
+        [[-.18,.60],[.00,.51],[.17,.30],[.25,.43],
+         [.32,.52],[.47,.49],[.55,.49],
+         [.68,.44],[.78,.23],[.79,.41],
+         [.78,.53],[1.01,.51],[1.18,.36]],
+        // Main: upper-right sweep returns left, then rejoins the central stream.
+        [[1.18,.05],[.92,.10],[.87,.06],[.71,.10],
+         [.55,.13],[.50,.36],[.46,.48],
+         [.52,.51],[.69,.45],[.78,.43],
+         [.98,.48],[1.04,.23],[.91,.13],
+         [.86,.07],[1.03,.06],[1.18,.01]],
+        // Secondary: broad lower loop.
+        [[-.18,.16],[.00,.26],[.17,.35],[.22,.48],
+         [.30,.69],[.38,.91],[.57,.90],
+         [.80,.93],[.70,.52],[.84,.48],
+         [.98,.43],[1.06,.53],[1.18,.46]],
+        // Secondary: lighter stream across the middle-bottom gap.
+        [[-.18,.72],[.13,.61],[.34,.54],[.50,.58],
+         [.62,.62],[.66,.65],[.74,.62],
+         [.90,.59],[1.02,.48],[1.18,.50]],
       ];
       this.tracks = curves.map(points => {
         const xy = [], lengths = [0];
@@ -40,7 +49,7 @@
       this.original=new Float32Array(homes);
       for(let i=0;i<n;i++) {
         // Balanced lanes and decorrelated widths prevent travelling clumps and empty cuts.
-        const route=i%this.tracks.length, tr=this.tracks[route];
+        const slot=i%100, route=slot<42 ? 0 : slot<74 ? 1 : slot<92 ? 2 : 3, tr=this.tracks[route];
         this.track[i]=route;this.start[i]=this.distance[i]=i/n*tr.length;
         const noise=Math.sin(i*127.1+phases[i]*311.7)*43758.5453;
         const spread=(noise-Math.floor(noise))*2-1;
@@ -49,12 +58,12 @@
         // Dense wisps, a soft wider cloud, then sparse spray beyond the silhouette.
         this.layer[i]=i%10<5 ? 0 : i%10<9 ? 1 : 2;
         this.wisp[i]=(i%23)/23*Math.PI*2;
-        if(this.layer[i]===0) this.offset[i]=spread*height*.0025;
+        if(this.layer[i]===0) this.offset[i]=spread*height*.013;
         else {
           const gaussian=Math.sqrt(-2*Math.log(Math.max(.0001,secondary)))*Math.cos((spread+1)*Math.PI);
           this.offset[i]=gaussian*height*(this.layer[i]===1 ? .065 : .17);
         }
-        this.speed[i]=Math.max(22,width*.038)*( .8+.4*(Math.sin(phases[i])* .5+.5))/3;
+        this.speed[i]=Math.max(22,width*.038)*( .8+.4*(Math.sin(phases[i])* .5+.5))/6;
       }
       // Even arc spacing keeps all branches continuously supplied with particles.
       this.progress=new Float32Array(n);this.initialProgress=new Float32Array(n);
@@ -106,7 +115,7 @@
       const damping = Math.pow(.86, frames);
       const p = this.position, v = this.velocity, h = this.home;
       for (let i = 0; i < this.phases.length; i++) {
-        const j = i * 2, phase = this.phases[i], drift = this.drift[i]*(this.flow && this.flow.layer[i]===0 ? .12 : 1);
+        const j = i * 2, phase = this.phases[i], drift = this.drift[i];
         if(this.flow && this.flow.recycled[i]) {p[j]=h[j];p[j+1]=h[j+1];v[j]=v[j+1]=0;}
         let ax = (h[j] + Math.sin(time * .65 + phase) * drift - p[j]) * .028;
         let ay = (h[j+1] + Math.cos(time * .51 + phase * 1.7) * drift * .65 - p[j+1]) * .028;

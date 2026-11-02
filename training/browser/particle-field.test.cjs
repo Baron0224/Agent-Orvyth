@@ -55,21 +55,23 @@ test('ribbon particles keep travelling over long distances and recycle without s
         assert.ok(f.opacity[k]<.01);
       }
     }
-    if(i===900) assert.ok(phases.some((_,k)=>Math.hypot(f.home[k*2]-initial[k*2],f.home[k*2+1]-initial[k*2+1])>100));
+    if(i===1800) assert.ok(phases.some((_,k)=>Math.hypot(f.home[k*2]-initial[k*2],f.home[k*2+1]-initial[k*2+1])>100));
   }
   assert.ok(wrapped);
   f.reset();assert.deepEqual(Array.from(f.home),initial);
 });
 
 
-test('all ribbon branches stay supplied and speed is one third of the previous setting', () => {
+test('all ribbon branches stay supplied and main routes dominate, secondary routes remain supplied, and speed is halved', () => {
   const n=3000, homes=new Float32Array(n*2), phases=Float32Array.from({length:n},(_,i)=>i*.7);
   const f=new Field(homes,phases,new Float32Array(n),{width:1200,height:650});
-  for(let i=0;i<n;i++) assert.ok(Math.abs(f.flow.speed[i]-Math.max(22,1200*.038)*(.8+.4*(Math.sin(phases[i])*.5+.5))/3)<.00001);
+  for(let i=0;i<n;i++) assert.ok(Math.abs(f.flow.speed[i]-Math.max(22,1200*.038)*(.8+.4*(Math.sin(phases[i])*.5+.5))/6)<.00001);
+  const counts=[0,0,0,0];for(const route of f.flow.track)counts[route]++;
+  assert.deepEqual(counts,[1260,960,540,240]);
   for(let seconds=0;seconds<=120;seconds++) {
-    const bins=Array.from({length:3},()=>new Uint16Array(32));
-    for(let i=0;i<n;i++) bins[f.flow.track[i]][Math.min(31,Math.floor(f.flow.progress[i]*32))]++;
-    assert.ok(bins.every(b=>Array.from(b).every(count=>count>=10)), 'no empty section along any path');
+    const bins=Array.from({length:4},()=>new Uint16Array(16));
+    for(let i=0;i<n;i++) bins[f.flow.track[i]][Math.min(15,Math.floor(f.flow.progress[i]*16))]++;
+    assert.ok(bins.every(b=>Array.from(b).every(count=>count>=4)), 'no empty section along any path');
     for(let frame=0;frame<30;frame++) f.flow.advance(1/30,f.home,f.opacity);
   }
 });
