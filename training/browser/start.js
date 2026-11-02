@@ -1,6 +1,9 @@
 /* Actual WebGL point sprites. The reference is sampled once, never drawn as a background. */
 (() => {
   'use strict';
+  // Optional comparison view; the default welcome layout stays at the bottom.
+  const applyLayout=()=>{document.body.dataset.layout=location.hash==='#center' ? 'center' : 'bottom';};
+  applyLayout();addEventListener('hashchange',applyLayout);
   const canvas=document.getElementById('particles');
   const gl=canvas.getContext('webgl',{alpha:true,antialias:false,powerPreference:'high-performance'});
   if(!gl)return;
