@@ -2,6 +2,8 @@
 
 Orvyth 是一个支持本地模型聊天、陪伴互动与待办管理的 AI 项目，原名 OpenAgent。
 
+GitHub 仓库：[Baron0224/Agent-Orvyth](https://github.com/Baron0224/Agent-Orvyth)。产品名称为 **Orvyth**。
+
 - [浏览器版启动说明](training/BROWSER_CHAT.md)
 - [终端版启动说明](training/LOCAL_CHAT.md)
 - [项目进度](PROGRESS.md)
