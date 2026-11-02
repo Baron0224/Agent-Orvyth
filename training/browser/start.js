@@ -6,12 +6,32 @@
   const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
   let welcomeTimer=0,letter=0;
   const message='Hi Boss';
+  let entering=false;
+  let pickParticle=()=>({x:innerWidth*.5,y:innerHeight*.48});
+  function enterChat(){
+    if(entering)return;
+    entering=true;clearTimeout(welcomeTimer);
+    const point=pickParticle();
+    document.body.style.setProperty('--focus-x',point.x+'px');
+    document.body.style.setProperty('--focus-y',point.y+'px');
+    const zoom=document.createElement('div');zoom.id='particle-portal';zoom.setAttribute('aria-hidden','true');
+    zoom.style.left=point.x+'px';zoom.style.top=point.y+'px';
+    const radius=Math.hypot(Math.max(point.x,innerWidth-point.x),Math.max(point.y,innerHeight-point.y));
+    zoom.style.setProperty('--cover-scale',String(radius*.8));
+    document.body.append(zoom);document.body.dataset.entering='true';
+    welcomeTimer=setTimeout(()=>{
+      try{sessionStorage.setItem('orvyth-welcome-arrival','1');}catch{}
+      location.replace('/');
+    },reduceMotion ? 250 : 1800);
+  }
+  const entryLink=document.querySelector('main a');
+  if(entryLink)entryLink.addEventListener('click',event=>{event.preventDefault();enterChat();});
   function typeGreeting(){
     letter=reduceMotion ? message.length : letter+1;
     greeting.textContent=message.slice(0,letter);
     greeting.dataset.typing=String(letter<message.length);
     if(letter<message.length) welcomeTimer=setTimeout(typeGreeting,320);
-    else welcomeTimer=setTimeout(()=>location.replace('/'),3000);
+    else welcomeTimer=setTimeout(enterChat,3000);
   }
   // Independent of WebGL or image loading, so entry still works without graphics support.
   if(greeting) welcomeTimer=setTimeout(typeGreeting,300);
@@ -35,6 +55,18 @@
   const visibilityAttr=gl.getAttribLocation(program,'visibility');
   const viewport=gl.getUniformLocation(program,'viewport'),density=gl.getUniformLocation(program,'dpr');
   let width=0,height=0,dpr=1,field=null,count=0,frame=0,last=0,time=0,lost=false;
+  pickParticle=()=>{
+    if(!field)return {x:innerWidth*.5,y:innerHeight*.48};
+    pointer.active=false;
+    let best=Infinity,chosen=-1;
+    for(let i=0;i<count;i++){
+      if(field.opacity[i]<.8)continue;
+      const dx=field.position[i*2]-width*.5,dy=field.position[i*2+1]-height*.48;
+      const score=dx*dx+dy*dy;
+      if(score<best){best=score;chosen=i;}
+    }
+    return chosen<0 ? {x:width*.5,y:height*.48} : {x:field.position[chosen*2],y:field.position[chosen*2+1]};
+  };
   let seed=87;
   const rand=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
   const pointer={x:0,y:0,radius:135,active:false};
