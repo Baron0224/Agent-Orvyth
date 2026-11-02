@@ -4,40 +4,47 @@
   // Arc-length tracks: particles travel along the ribbon, rather than orbiting a fixed pixel.
   class RibbonFlow {
     constructor(homes, phases, {width, height}) {
+      // Paths follow the marked upper sweep, lower return and inner curl.
+      // Open endpoints sit beyond the viewport; no visible branch fades out midway.
       const curves = [
-        [[-.12,.22],[.35,.26],[.52,.92],[1.12,.32]],
-        [[.27,.74],[.63,1.36],[.72,.24],[1.08,.48]],
-        [[1.08,.38],[.97,-.30],[.70,.20],[.43,.45]],
+        [[-.18,.16],[.12,.29],[.40,.55],[.63,.58],
+         [.83,.67],[1.04,.20],[.91,.11],
+         [.82,-.01],[.61,.34],[.43,.49],
+         [.24,.29],[.02,.48],[-.18,.76]],
+        [[-.18,.76],[.06,.43],[.22,.33],[.30,.43],
+         [.28,.68],[.39,.89],[.57,.88],
+         [.77,.94],[.74,.48],[.83,.48],
+         [.98,.42],[1.02,.61],[1.18,.72]],
+        [[1.18,.36],[.99,.28],[.97,.50],[.77,.48],
+         [.93,.14],[.73,.38],[.48,.48],
+         [.29,.55],[.06,.47],[-.18,.39]],
       ];
       this.tracks = curves.map(points => {
         const xy = [], lengths = [0];
-        for (let k=0;k<=160;k++) {
-          const t=k/160, u=1-t;
-          const x=width*(u*u*u*points[0][0]+3*u*u*t*points[1][0]+3*u*t*t*points[2][0]+t*t*t*points[3][0]);
-          const y=height*(u*u*u*points[0][1]+3*u*u*t*points[1][1]+3*u*t*t*points[2][1]+t*t*t*points[3][1]);
-          if(k) lengths.push(lengths[k-1]+Math.hypot(x-xy[k*2-2],y-xy[k*2-1]));
-          xy.push(x,y);
+        for(let segment=0;segment<(points.length-1)/3;segment++) {
+          const p=points.slice(segment*3,segment*3+4);
+          for(let k=segment ? 1 : 0;k<=100;k++) {
+            const t=k/100,u=1-t;
+            const x=width*(u*u*u*p[0][0]+3*u*u*t*p[1][0]+3*u*t*t*p[2][0]+t*t*t*p[3][0]);
+            const y=height*(u*u*u*p[0][1]+3*u*u*t*p[1][1]+3*u*t*t*p[2][1]+t*t*t*p[3][1]);
+            if(xy.length) lengths.push(lengths[lengths.length-1]+Math.hypot(x-xy[xy.length-2],y-xy[xy.length-1]));
+            xy.push(x,y);
+          }
         }
-        return {xy, lengths, length:lengths[160]};
+        return {xy,lengths,length:lengths[lengths.length-1]};
       });
       const n=phases.length;
       this.recycled=new Uint8Array(n);this.track=new Uint8Array(n);this.start=new Float32Array(n);
       this.distance=new Float32Array(n);this.offset=new Float32Array(n);this.speed=new Float32Array(n);
       this.original=new Float32Array(homes);
       for(let i=0;i<n;i++) {
-        let best=Infinity, route=0, index=0;
-        for(let r=0;r<this.tracks.length;r++) {
-          const a=this.tracks[r].xy;
-          for(let k=0;k<160;k++) {
-            const d=(a[k*2]-homes[i*2])**2+(a[k*2+1]-homes[i*2+1])**2;
-            if(d<best){best=d;route=r;index=k;}
-          }
-        }
-        const tr=this.tracks[route], a=tr.xy, j=index*2;
-        const dx=a[j+2]-a[j],dy=a[j+3]-a[j+1],len=Math.hypot(dx,dy);
-        this.track[i]=route;this.start[i]=this.distance[i]=tr.lengths[index];
-        this.offset[i]=height*.18*Math.tanh(((homes[i*2]-a[j])*-dy+(homes[i*2+1]-a[j+1])*dx)/(len*height*.18));
-        this.speed[i]=Math.max(22,width*.038)*( .8+.4*(Math.sin(phases[i])* .5+.5));
+        // Balanced lanes and decorrelated widths prevent travelling clumps and empty cuts.
+        const route=i%this.tracks.length, tr=this.tracks[route];
+        this.track[i]=route;this.start[i]=this.distance[i]=i/n*tr.length;
+        const noise=Math.sin(i*127.1+phases[i]*311.7)*43758.5453;
+        const spread=(noise-Math.floor(noise))*2-1;
+        this.offset[i]=Math.sign(spread)*Math.pow(Math.abs(spread),1.8)*height*.065;
+        this.speed[i]=Math.max(22,width*.038)*( .8+.4*(Math.sin(phases[i])* .5+.5))/3;
       }
       // Even arc spacing keeps all branches continuously supplied with particles.
       this.progress=new Float32Array(n);this.initialProgress=new Float32Array(n);
@@ -54,7 +61,7 @@
         this.recycled[i]=next>=1 ? 1 : 0;
         const progress=this.progress[i]=next%1;
         const d=this.distance[i]=progress*tr.length;
-        let lo=0,hi=159;
+        let lo=0,hi=lens.length-2;
         while(lo<hi){const m=(lo+hi+1)>>>1;if(lens[m]<=d)lo=m;else hi=m-1;}
         const j=lo*2, dx=a[j+2]-a[j],dy=a[j+3]-a[j+1], len=lens[lo+1]-lens[lo];
         const t=(d-lens[lo])/len, offset=this.offset[i];
