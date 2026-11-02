@@ -13,7 +13,9 @@
     void main(){
       float aspect=resolution.x/resolution.y;
       vec2 fit=vec2(min(1.,aspect/imageAspect),min(1.,imageAspect/aspect));
+      // Crop to the dense ribbon, so particles extend behind the entire welcome screen.
       vec2 p=(uv-.5)*fit+.5;
+      p=vec2(.08,.32)+p*vec2(.84,.62);
       if(p.x<0.||p.x>1.||p.y<0.||p.y>1.){gl_FragColor=vec4(0.,0.,0.,0.);return;}
       float edge=smoothstep(0.,.12,p.x)*(1.-smoothstep(.88,1.,p.x));
       float field=smoothstep(.14,.35,p.y)*(1.-smoothstep(.95,1.,p.y))*edge;
@@ -54,7 +56,7 @@
   function render(){
     if(!ready||lost)return;
     gl.uniform2f(uniforms.resolution,canvas.width,canvas.height);
-    gl.uniform1f(uniforms.imageAspect,image.naturalWidth/image.naturalHeight);
+    gl.uniform1f(uniforms.imageAspect,(image.naturalWidth*.84)/(image.naturalHeight*.62));
     gl.uniform1f(uniforms.time,motion.matches?0:time);
     gl.uniform2f(uniforms.pointer,motion.matches?0:x,motion.matches?0:y);
     gl.drawArrays(gl.TRIANGLES,0,6);
