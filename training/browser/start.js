@@ -43,7 +43,7 @@
       total+=Math.pow(Math.max(0,light-24),1.35);cdf[i]=total;
     }
     if(!total)return;
-    count=width<650?26000:70000;
+    count=width<650?42000:115000;
     const homes=new Float32Array(count*2),phases=new Float32Array(count),drift=new Float32Array(count),colors=new Float32Array(count*4);
     for(let i=0;i<count;i++){
       const target=rand()*total;let lo=0,hi=totalPixels-1;

@@ -36,6 +36,7 @@
       const n=phases.length;
       this.recycled=new Uint8Array(n);this.track=new Uint8Array(n);this.start=new Float32Array(n);
       this.distance=new Float32Array(n);this.offset=new Float32Array(n);this.speed=new Float32Array(n);
+      this.layer=new Uint8Array(n);this.wisp=new Float32Array(n);this.height=height;
       this.original=new Float32Array(homes);
       for(let i=0;i<n;i++) {
         // Balanced lanes and decorrelated widths prevent travelling clumps and empty cuts.
@@ -43,7 +44,16 @@
         this.track[i]=route;this.start[i]=this.distance[i]=i/n*tr.length;
         const noise=Math.sin(i*127.1+phases[i]*311.7)*43758.5453;
         const spread=(noise-Math.floor(noise))*2-1;
-        this.offset[i]=Math.sign(spread)*Math.pow(Math.abs(spread),1.8)*height*.065;
+        const noise2=Math.sin(i*269.5+37.2)*18391.317;
+        const secondary=noise2-Math.floor(noise2);
+        // Dense wisps, a soft wider cloud, then sparse spray beyond the silhouette.
+        this.layer[i]=i%10<5 ? 0 : i%10<9 ? 1 : 2;
+        this.wisp[i]=(i%23)/23*Math.PI*2;
+        if(this.layer[i]===0) this.offset[i]=spread*height*.013;
+        else {
+          const gaussian=Math.sqrt(-2*Math.log(Math.max(.0001,secondary)))*Math.cos((spread+1)*Math.PI);
+          this.offset[i]=gaussian*height*(this.layer[i]===1 ? .065 : .17);
+        }
         this.speed[i]=Math.max(22,width*.038)*( .8+.4*(Math.sin(phases[i])* .5+.5))/3;
       }
       // Even arc spacing keeps all branches continuously supplied with particles.
@@ -64,12 +74,17 @@
         let lo=0,hi=lens.length-2;
         while(lo<hi){const m=(lo+hi+1)>>>1;if(lens[m]<=d)lo=m;else hi=m-1;}
         const j=lo*2, dx=a[j+2]-a[j],dy=a[j+3]-a[j+1], len=lens[lo+1]-lens[lo];
-        const t=(d-lens[lo])/len, offset=this.offset[i];
+        const t=(d-lens[lo])/len, phase=this.wisp[i], h=this.height;
+        const breath=.9+.25*Math.sin(d*.006+this.track[i]*2)+.13*Math.sin(d*.019);
+        let offset=this.offset[i]*breath;
+        // Interwoven strands meander independently instead of sharing a ruler-straight edge.
+        if(this.layer[i]===0) offset+=h*(.034*Math.sin(d*.007+phase)+.024*Math.sin(d*.015+phase*2.3));
+        else offset+=h*.014*Math.sin(d*.012+phase);
         const x=a[j]+dx*t-dy/len*offset, y=a[j+1]+dy*t+dx/len*offset;
         // Wrap only while invisible, so recycling cannot streak across the screen.
         homes[i*2]=x;homes[i*2+1]=y;
         const fade=Math.min(1,progress*tr.length/65,(1-progress)*tr.length/65);
-        opacity[i]=fade*fade*(3-2*fade);
+        opacity[i]=fade*fade*(3-2*fade)*(this.layer[i]===2 ? .5 : 1);
       }
     }
     reset(homes,opacity){this.distance.set(this.start);this.progress.set(this.initialProgress);this.advance(0,homes,opacity);}
