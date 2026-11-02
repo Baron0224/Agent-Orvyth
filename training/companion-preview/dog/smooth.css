@@ -1,0 +1,11 @@
+.pet{width:min(390px,100%);aspect-ratio:1;perspective:800px;overflow:visible;isolation:isolate}
+.rig{position:absolute;inset:0;pointer-events:none}
+.rig-part,.head-face{position:absolute;background-image:url('./dog-rig.png');background-size:200% 200%;background-repeat:no-repeat}
+.ground{position:absolute;width:48%;height:4%;background:#bda68a;filter:blur(9px);opacity:.13;bottom:4%;left:26%;border-radius:50%}
+.torso{width:51%;height:51%;left:24.5%;top:46%;background-position:0% 100%;transform-origin:50% 87%;will-change:transform}
+.tail{width:32%;height:32%;left:62%;top:57%;background-position:100% 100%;transform-origin:35% 77%;will-change:transform}
+.head{position:absolute;width:64%;height:64%;left:18%;top:0;transform-origin:50% 84%;transform-style:preserve-3d;will-change:transform}
+.head-face{inset:0;background-position:0% 0%;backface-visibility:hidden}
+.head-closed{background-position:100% 0%;opacity:0;transition:opacity .045s linear}
+.settings-group{display:flex;justify-content:center;gap:22px;flex-wrap:wrap}.settings{margin-top:20px}.control:disabled{opacity:.45;cursor:wait}
+@media(prefers-reduced-motion:reduce){.rig *{transform:none!important;transition:none!important}}

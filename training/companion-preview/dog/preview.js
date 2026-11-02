@@ -1,71 +1,91 @@
 const pet = document.getElementById('pet');
-const follow = document.getElementById('follow');
-const status = document.getElementById('status');
-const poses = [...document.querySelectorAll('.pose')];
+const follow = document.getElementById('follow'), idle = document.getElementById('idle');
+const status = document.getElementById('status'), head = document.getElementById('head');
+const torso = document.getElementById('torso'), tail = document.getElementById('tail'), closed = document.getElementById('closed-eyes');
 const controls = [...document.querySelectorAll('[data-pose]')];
-const labels = ['看着你', '向左看看', '向右看看', '抬头看看', '低头看看', '被你摸摸，好开心'];
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
-let current = 0, happyUntil = 0, pending = false, lastPointer = null, timer;
-function showPose(index) {
-  if (current !== index) {
-    poses[current].classList.remove('visible');
-    poses[index].classList.add('visible');
-    current = index;
-  }
-  controls.forEach(button => button.setAttribute('aria-pressed', String(Number(button.dataset.pose) === index)));
-  status.textContent = labels[index];
+const random = (a,b) => a + Math.random()*(b-a), clamp = (v,a,b) => Math.max(a,Math.min(b,v));
+let gaze={x:0,y:0}, position={x:0,y:0,tilt:0}, lastPointer=-Infinity, lastFrame=0, frame=0, ready=false, bounds;
+let action=null, actionStart=0, nextIdle=0, nextBlink=0, blinkEnd=0, staticPose=0, isBlinking=false;
+function updateBounds(){bounds=pet.getBoundingClientRect();}
+function setStatus(text){if(status.textContent!==text)status.textContent=text;}
+function highlight(index){controls.forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.pose)===index)));}
+function setBlink(value){if(value===isBlinking)return;isBlinking=value;closed.style.opacity=value?'1':'0';}
+function act(kind,now=performance.now()){
+  if(!ready)return;
+  action=kind;actionStart=now;nextIdle=now+random(8500,14000);pet.dataset.activity=kind;
+  setStatus(({pat:'被摸摸了，开心地摇摇尾巴',curious:'歪头看看你',sniff:'低头闻一闻',stretch:'伸个小懒腰',wag:'自己摇一会儿尾巴'})[kind]);
+  highlight(kind==='pat'?5:-1);
+  if(reducedMotion.matches){setStatus('已收到互动，当前已减少动态效果');action=null;}
 }
-function resetOffset() {
-  pet.style.setProperty('--dx', '0px'); pet.style.setProperty('--dy', '0px');
+function rest(now){action=null;pet.dataset.activity='rest';highlight(follow.checked?-1:staticPose);nextIdle=now+random(7000,12000);}
+function resetTransforms(){head.style.transform='';torso.style.transform='';tail.style.transform='';}
+function draw(now){
+  frame=0;if(!ready||document.hidden)return;
+  const dt=lastFrame?Math.min((now-lastFrame)/1000,.05):1/60;lastFrame=now;
+  if(reducedMotion.matches){resetTransforms();setBlink(false);return;}
+  const quiet=now-lastPointer>3000;
+  if(!action&&idle.checked&&quiet&&now>=nextIdle)act(['curious','sniff','stretch','wag'][Math.floor(Math.random()*4)],now);
+  let x=follow.checked&&quiet?0:gaze.x,y=follow.checked&&quiet?0:gaze.y,tilt=0,nod=0,bounce=0,wag=0;
+  const breathing=idle.checked?Math.sin(now*.00165):0;
+  if(action){
+    const t=(now-actionStart)/1000,duration=action==='pat'?2.7:3.8;
+    if(t>duration)rest(now);
+    else{
+      // Zero-slope envelope prevents jumps at the start and end of each action.
+      const e=Math.sin(Math.PI*t/duration)**2;
+      if(action==='pat'){tilt=Math.sin(t*2.5)*9*e;wag=Math.sin(t*14)*17*e;bounce=Math.sin(t*5)*1.7*e;}
+      if(action==='curious'){tilt=11*e;x=-.15*e;nod=-2*e;}
+      if(action==='sniff'){y=.5*e;nod=Math.sin(t*8)*1.8*e;}
+      if(action==='stretch'){y=-.5*e;bounce=-3*e;}
+      if(action==='wag')wag=Math.sin(t*9)*13*e;
+    }
+  }else setStatus(quiet&&idle.checked?'安静陪着你，也会自己动一动':'慢慢看向你');
+  if(idle.checked&&quiet)tilt+=Math.sin(now*.00063)*1.15;
+  // Time-based damping gives the same response at different refresh rates.
+  const smoothing=1-Math.exp(-dt/.14);
+  position.x+=(x-position.x)*smoothing;position.y+=(y-position.y)*smoothing;position.tilt+=(tilt-position.tilt)*smoothing;
+  head.style.transform='translate3d('+(position.x*7)+'px,'+(position.y*4+breathing*.65+nod+bounce)+'px,0) rotateY('+(position.x*13)+'deg) rotateX('+(-position.y*8)+'deg) rotateZ('+(position.x*3+position.tilt)+'deg)';
+  torso.style.transform='translateY('+(breathing*.45+bounce*.3)+'px) scale('+(1+breathing*.003)+','+(1+breathing*.006)+')';
+  tail.style.transform='rotate('+(wag+(idle.checked?Math.sin(now*.0017)*1.6:0))+'deg)';
+  if(idle.checked&&now>=nextBlink){blinkEnd=now+random(110,160);nextBlink=now+random(3300,6500);}
+  setBlink(idle.checked&&now<blinkEnd);frame=requestAnimationFrame(draw);
 }
-function manualPose(index) {
-  clearTimeout(timer); happyUntil = 0; pet.classList.remove('happy'); resetOffset();
-  follow.checked = false; showPose(index);
-}
-function pat() {
-  clearTimeout(timer); happyUntil = Date.now() + 1600;
-  resetOffset(); showPose(5); pet.classList.remove('happy');
-  // Restart the short reaction on repeated clicks.
-  void pet.offsetWidth; pet.classList.add('happy');
-  timer = setTimeout(() => { happyUntil = 0; pet.classList.remove('happy'); showPose(0); }, 1600);
-}
-function pointAt(clientX, clientY) {
-  if (!follow.checked || Date.now() < happyUntil || pet.disabled) return;
-  const box = pet.getBoundingClientRect();
-  const x = (clientX - box.left - box.width / 2) / Math.max(180, box.width * .85);
-  const y = (clientY - box.top - box.height * .35) / Math.max(180, box.height * .85);
-  // A wider neutral band when returning to center prevents edge flicker.
-  const threshold = current === 0 ? .38 : .27;
-  const next = Math.max(Math.abs(x), Math.abs(y)) < threshold ? 0 : Math.abs(x) > Math.abs(y) ? (x < 0 ? 1 : 2) : (y < 0 ? 3 : 4);
-  showPose(next);
-  if (!reducedMotion.matches) {
-    pet.style.setProperty('--dx', `${Math.max(-2, Math.min(2, x * 2))}px`);
-    pet.style.setProperty('--dy', `${Math.max(-1, Math.min(1, y))}px`);
-  }
-}
-document.addEventListener('pointermove', event => {
-  if (event.pointerType === 'touch') return;
-  lastPointer = [event.clientX, event.clientY];
-  if (pending) return;
-  pending = true;
-  requestAnimationFrame(() => { pending = false; pointAt(...lastPointer); });
+function start(){if(!ready||document.hidden||frame)return;lastFrame=0;frame=requestAnimationFrame(draw);}
+function stop(){cancelAnimationFrame(frame);frame=0;lastFrame=0;}
+document.addEventListener('pointermove',event=>{
+  if(event.pointerType==='touch'||!follow.checked||!ready)return;
+  gaze.x=clamp((event.clientX-bounds.left-bounds.width/2)/Math.max(180,bounds.width*.75),-1,1);
+  gaze.y=clamp((event.clientY-bounds.top-bounds.height*.32)/Math.max(180,bounds.height*.75),-1,1);
+  lastPointer=performance.now();
 });
-function rest() { if (Date.now() >= happyUntil && follow.checked) { resetOffset(); showPose(0); } }
-document.documentElement.addEventListener('pointerleave', rest);
-window.addEventListener('blur', rest);
-follow.addEventListener('change', () => { clearTimeout(timer); happyUntil = 0; pet.classList.remove('happy'); resetOffset(); showPose(0); });
-controls.forEach(button => button.addEventListener('click', () => {
-  const index = Number(button.dataset.pose);
-  if (index === 5) pat(); else manualPose(index);
-}));
-pet.addEventListener('click', pat);
-pet.addEventListener('keydown', event => {
-  const index = {ArrowLeft:1, ArrowRight:2, ArrowUp:3, ArrowDown:4, Escape:0}[event.key];
-  if (index === undefined) return;
-  event.preventDefault(); manualPose(index);
+document.documentElement.addEventListener('pointerleave',()=>{lastPointer=-Infinity;});
+window.addEventListener('blur',()=>{lastPointer=-Infinity;});
+window.addEventListener('resize',updateBounds);window.addEventListener('scroll',updateBounds,{passive:true});
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden)stop();
+  else{const now=performance.now();nextIdle=now+random(4000,8000);nextBlink=now+random(1500,3500);action=null;start();}
 });
-reducedMotion.addEventListener('change', resetOffset);
-const image = new Image();
-image.onload = () => { pet.disabled = false; document.getElementById('loading').hidden = true; };
-image.onerror = () => { document.getElementById('loading').textContent = '图片没有载入，请刷新预览页再试。'; };
-image.src = './dog-poses.png';
+follow.addEventListener('change',()=>{gaze={x:0,y:0};lastPointer=-Infinity;staticPose=0;highlight(follow.checked?-1:0);start();});
+idle.addEventListener('change',()=>{rest(performance.now());setBlink(false);start();});
+function manualPose(index){
+  follow.checked=false;staticPose=index;rest(performance.now());
+  gaze=([{x:0,y:0},{x:-1,y:0},{x:1,y:0},{x:0,y:-1},{x:0,y:1}])[index];
+  highlight(index);lastPointer=performance.now();start();
+}
+controls.forEach(b=>b.addEventListener('click',()=>{const index=Number(b.dataset.pose);if(index===5)act('pat');else manualPose(index);}));
+pet.addEventListener('click',()=>act('pat'));
+document.getElementById('idle-demo').addEventListener('click',()=>act('curious'));
+pet.addEventListener('keydown',event=>{
+  const index={ArrowLeft:1,ArrowRight:2,ArrowUp:3,ArrowDown:4,Escape:0}[event.key];
+  if(index===undefined)return;event.preventDefault();manualPose(index);
+});
+reducedMotion.addEventListener('change',()=>{stop();start();});
+const image=new Image();
+image.onload=()=>{
+  ready=true;pet.disabled=false;document.querySelectorAll('button.control').forEach(b=>{b.disabled=false;});
+  document.getElementById('loading').hidden=true;updateBounds();
+  const now=performance.now();nextIdle=now+4800;nextBlink=now+2200;highlight(-1);pet.dataset.activity='rest';start();
+};
+image.onerror=()=>{document.getElementById('loading').textContent='素材没有载入，请刷新重试。';};
+image.src='./dog-rig.png';
