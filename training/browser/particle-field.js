@@ -7,26 +7,26 @@
       // Paths follow the marked upper sweep, lower return and inner curl.
       // Open endpoints sit beyond the viewport; no visible branch fades out midway.
       const curves = [
-        // Main: left inlet through the central stream and inner curl to the right.
-        [[-.18,.60],[.00,.51],[.17,.30],[.25,.43],
-         [.32,.52],[.47,.49],[.55,.49],
-         [.68,.44],[.78,.23],[.79,.41],
-         [.78,.53],[1.01,.51],[1.18,.36]],
-        // Main: upper-right sweep returns left, then rejoins the central stream.
+        // Main inlet follows the marked upper-left descent into a flatter central stream.
+        [[-.18,-.16],[-.01,.03],[.07,.28],[.22,.41],
+         [.31,.46],[.45,.47],[.57,.47],
+         [.66,.47],[.69,.41],[.75,.43],
+         [.86,.47],[1.02,.52],[1.18,.47]],
+        // Broad upper sweep retained; the former tight inner curl is removed.
         [[1.18,.05],[.92,.10],[.87,.06],[.71,.10],
-         [.55,.13],[.50,.36],[.46,.48],
-         [.52,.51],[.69,.45],[.78,.43],
-         [.98,.48],[1.04,.23],[.91,.13],
-         [.86,.07],[1.03,.06],[1.18,.01]],
-        // Secondary: broad lower loop.
-        [[-.18,.16],[.00,.26],[.17,.35],[.22,.48],
-         [.30,.69],[.38,.91],[.57,.90],
-         [.80,.93],[.70,.52],[.84,.48],
-         [.98,.43],[1.06,.53],[1.18,.46]],
-        // Secondary: lighter stream across the middle-bottom gap.
+         [.55,.13],[.50,.36],[.46,.47],
+         [.56,.48],[.66,.46],[.75,.43],
+         [.89,.49],[1.04,.38],[1.00,.26],
+         [.99,.17],[1.12,.13],[1.18,.16]],
+        // Lower-left inlet converges at the same junction, then follows the secondary loop.
+        [[-.18,.65],[-.01,.55],[.11,.49],[.22,.41],
+         [.30,.66],[.38,.91],[.57,.90],
+         [.80,.93],[.75,.57],[.88,.54],
+         [.99,.52],[1.08,.55],[1.18,.51]],
+        // Keep the lighter middle stream below the main flow, avoiding the crowded junction.
         [[-.18,.72],[.13,.61],[.34,.54],[.50,.58],
          [.62,.62],[.66,.65],[.74,.62],
-         [.90,.59],[1.02,.48],[1.18,.50]],
+         [.88,.60],[1.02,.61],[1.18,.63]],
       ];
       this.tracks = curves.map(points => {
         const xy = [], lengths = [0];
@@ -40,12 +40,13 @@
             xy.push(x,y);
           }
         }
-        return {xy,lengths,length:lengths[lengths.length-1]};
+        const junction=Float32Array.from(lengths,(_,k)=>Math.exp(-(((xy[k*2]/width-.78)/.14)**2+((xy[k*2+1]/height-.40)/.17)**2)));
+        return {xy,lengths,junction,length:lengths[lengths.length-1]};
       });
       const n=phases.length;
       this.recycled=new Uint8Array(n);this.track=new Uint8Array(n);this.start=new Float32Array(n);
       this.distance=new Float32Array(n);this.offset=new Float32Array(n);this.speed=new Float32Array(n);
-      this.layer=new Uint8Array(n);this.wisp=new Float32Array(n);this.height=height;
+      this.layer=new Uint8Array(n);this.wisp=new Float32Array(n);this.height=height;this.width=width;
       this.original=new Float32Array(homes);
       for(let i=0;i<n;i++) {
         // Balanced lanes and decorrelated widths prevent travelling clumps and empty cuts.
@@ -89,7 +90,11 @@
         // Interwoven strands meander independently instead of sharing a ruler-straight edge.
         if(this.layer[i]===0) offset+=h*(.034*Math.sin(d*.007+phase)+.024*Math.sin(d*.015+phase*2.3));
         else offset+=h*.014*Math.sin(d*.012+phase);
-        const x=a[j]+dx*t-dy/len*offset, y=a[j+1]+dy*t+dx/len*offset;
+        const centerX=a[j]+dx*t,centerY=a[j+1]+dy*t;
+        // Gently narrow the marked right-hand junction, preserving scattered natural edges.
+        const junction=tr.junction[lo]+(tr.junction[lo+1]-tr.junction[lo])*t;
+        offset*=1-.34*junction;
+        const x=centerX-dy/len*offset, y=centerY+dx/len*offset;
         // Wrap only while invisible, so recycling cannot streak across the screen.
         homes[i*2]=x;homes[i*2+1]=y;
         const fade=Math.min(1,progress*tr.length/65,(1-progress)*tr.length/65);
