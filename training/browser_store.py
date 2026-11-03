@@ -10,6 +10,11 @@ import secrets
 import sqlite3
 import time
 import uuid
+from datetime import datetime, date, timedelta
+
+
+def local_now():
+    return datetime.now().astimezone()
 
 
 class MissingRecord(ValueError):
@@ -36,6 +41,11 @@ class Store:
                     id TEXT PRIMARY KEY, owner TEXT NOT NULL, title TEXT NOT NULL,
                     done INTEGER NOT NULL DEFAULT 0, created REAL NOT NULL);
             """)
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(tasks)")}
+            for name, kind in (("remind_time", "TEXT"), ("start_date", "TEXT"), ("end_date", "TEXT"), ("last_done_date", "TEXT"), ("due_at", "REAL")):
+                if name not in columns:
+                    db.execute(f"ALTER TABLE tasks ADD COLUMN {name} {kind}")
+            db.execute("CREATE TABLE IF NOT EXISTS reminder_drafts (chat TEXT PRIMARY KEY, owner TEXT NOT NULL, data TEXT NOT NULL)")
 
     @contextmanager
     def connect(self):
@@ -83,7 +93,29 @@ class Store:
         with self.connect() as db:
             profile = db.execute("SELECT profile, active_chat FROM owners WHERE id=?", (owner,)).fetchone()
             chats = [dict(row) for row in db.execute("SELECT id,title,created,updated FROM chats WHERE owner=? ORDER BY updated DESC", (owner,))]
-            tasks = [dict(row) for row in db.execute("SELECT id,title,done,created FROM tasks WHERE owner=? ORDER BY created DESC", (owner,))]
+            tasks = []
+            now = local_now()
+            today = now.date().isoformat()
+            for row in db.execute("SELECT * FROM tasks WHERE owner=? ORDER BY created DESC", (owner,)):
+                item = dict(row)
+                if item["remind_time"]:
+                    if item["due_at"] is not None:
+                        item["waiting"] = now.timestamp() < item["due_at"] and not item["last_done_date"]
+                        item["expired"] = False
+                        item["done"] = int(bool(item["last_done_date"]))
+                    else:
+                        expired = bool(item["end_date"] and today > item["end_date"])
+                        scheduled = today < item["start_date"] or bool(item["last_done_date"] and item["last_done_date"] < today and now.strftime("%H:%M") < item["remind_time"])
+                        item["waiting"] = scheduled
+                        item["expired"] = expired
+                        item["done"] = int(expired or scheduled or item["last_done_date"] == today)
+                if item["remind_time"]:
+                    item["occurrence_date"] = today
+                    if item["due_at"] is not None:
+                        item["remind_due"] = not item["done"] and not item["waiting"]
+                    else:
+                        item["remind_due"] = not item["done"] and not item["waiting"] and today >= item["start_date"] and now.strftime("%H:%M") >= item["remind_time"]
+                tasks.append(item)
             messages = [dict(row) for row in db.execute("SELECT role,content FROM messages WHERE chat=? ORDER BY id", (profile["active_chat"],))]
             return {"profile": json.loads(profile["profile"]), "chats": chats, "tasks": tasks,
                     "active_chat": profile["active_chat"], "messages": messages}
@@ -107,10 +139,12 @@ class Store:
                 db.execute("UPDATE chats SET title=?,manual_title=1 WHERE id=?", (title, chat))
             elif action == "clear":
                 db.execute("DELETE FROM messages WHERE chat=?", (chat,))
+                db.execute("DELETE FROM reminder_drafts WHERE chat=? AND owner=?", (chat, owner))
                 db.execute("UPDATE owners SET active_chat=? WHERE id=?", (chat, owner))
             elif action == "delete":
                 db.execute("DELETE FROM messages WHERE chat=?", (chat,))
                 db.execute("DELETE FROM chats WHERE id=?", (chat,))
+                db.execute("DELETE FROM reminder_drafts WHERE chat=? AND owner=?", (chat, owner))
                 active = db.execute("SELECT active_chat FROM owners WHERE id=?", (owner,)).fetchone()[0]
                 if active == chat:
                     other = db.execute("SELECT id FROM chats WHERE owner=? ORDER BY updated DESC LIMIT 1", (owner,)).fetchone()
@@ -140,6 +174,9 @@ class Store:
         pet_name = self.text(payload.get("pet_name"), 16, "精灵名字")
         avatar = payload.get("avatar", "")
         motion = payload.get("pet_motion", True)
+        kind = payload.get("pet_kind")
+        if kind is not None and kind not in ("dog", "cat"):
+            raise ValueError("请选择小狗或小猫。")
         if not isinstance(motion, bool) or not isinstance(avatar, str):
             raise ValueError("资料格式不正确。")
         if avatar:
@@ -154,6 +191,10 @@ class Store:
                 raise ValueError("头像请使用不超过 150KB 的 PNG 图片。") from None
         profile = {"name": name, "pet_name": pet_name, "avatar": avatar, "pet_motion": motion}
         with self.connect() as db:
+            if kind is None:
+                previous = db.execute("SELECT profile FROM owners WHERE id=?", (owner,)).fetchone()
+                kind = json.loads(previous["profile"]).get("pet_kind", "dog")
+            profile["pet_kind"] = kind
             db.execute("UPDATE owners SET profile=? WHERE id=?", (json.dumps(profile), owner))
 
     def task_action(self, owner, action, payload):
@@ -163,13 +204,47 @@ class Store:
                 db.execute("INSERT INTO tasks(id,owner,title,created) VALUES (?,?,?,?)", (uuid.uuid4().hex, owner, title, time.time()))
                 return
             task = payload.get("id")
-            if not db.execute("SELECT 1 FROM tasks WHERE id=? AND owner=?", (task, owner)).fetchone():
+            row = db.execute("SELECT * FROM tasks WHERE id=? AND owner=?", (task, owner)).fetchone()
+            if not row:
                 raise MissingRecord("任务不存在。")
             if action == "toggle":
                 if not isinstance(payload.get("done"), bool):
                     raise ValueError("任务状态不正确。")
-                db.execute("UPDATE tasks SET done=? WHERE id=? AND owner=?", (int(payload["done"]), task, owner))
+                if row["remind_time"]:
+                    today = local_now().date().isoformat()
+                    if row["due_at"] is not None and local_now().timestamp() < row["due_at"]:
+                        raise ValueError("提醒时间还没到。")
+                    if row["due_at"] is None and row["end_date"] and today > row["end_date"]:
+                        raise ValueError("这个周期已结束。")
+                    if today < row["start_date"]:
+                        raise ValueError("任务尚未开始。")
+                    db.execute("UPDATE tasks SET last_done_date=? WHERE id=? AND owner=?", (today if payload["done"] else None, task, owner))
+                else:
+                    db.execute("UPDATE tasks SET done=? WHERE id=? AND owner=?", (int(payload["done"]), task, owner))
             elif action == "delete":
                 db.execute("DELETE FROM tasks WHERE id=? AND owner=?", (task, owner))
             else:
                 raise ValueError("未知任务操作。")
+
+    def reminder_chat(self, owner, chat, question):
+        from reminders import process_reminder
+        with self.connect() as db:
+            row = self.require_chat(db, owner, chat)
+            saved = db.execute("SELECT data FROM reminder_drafts WHERE chat=? AND owner=?", (chat, owner)).fetchone()
+            draft = json.loads(saved[0]) if saved else None
+            result = process_reminder(question, draft, local_now())
+            if result is None:
+                return None
+            reply, next_draft, task = result
+            if next_draft is None:
+                db.execute("DELETE FROM reminder_drafts WHERE chat=? AND owner=?", (chat, owner))
+            else:
+                db.execute("INSERT INTO reminder_drafts(chat,owner,data) VALUES (?,?,?) ON CONFLICT(chat) DO UPDATE SET data=excluded.data,owner=excluded.owner", (chat,owner,json.dumps(next_draft,ensure_ascii=False)))
+            if task:
+                db.execute("INSERT INTO tasks(id,owner,title,created,remind_time,start_date,end_date,due_at) VALUES (?,?,?,?,?,?,?,?)", (uuid.uuid4().hex,owner,task["title"],time.time(),task["time"],task["start"],task["end"],task.get("due_at")))
+            db.executemany("INSERT INTO messages(chat,role,content) VALUES (?,?,?)", [(chat,"user",question),(chat,"assistant",reply)])
+            title = row["title"]
+            if not row["manual_title"] and title == "新聊天":
+                title = re.sub(r"\s+", " ", question).strip()[:24]
+            db.execute("UPDATE chats SET title=?,updated=? WHERE id=?", (title,time.time(),chat))
+            return reply

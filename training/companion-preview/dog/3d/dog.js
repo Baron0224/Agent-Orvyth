@@ -1,4 +1,4 @@
-import * as T from 'three';
+import * as T from './vendor/three.module.js';
 import {makeDog} from './model.js';
 
 const stage=document.getElementById('stage'),status=document.getElementById('status');
@@ -17,7 +17,7 @@ function draw(nowMs){
  frame=0;if(!rig||document.hidden)return;
  const now=nowMs/1000,dt=lastTime?Math.min(now-lastTime,.05):1/60;lastTime=now;
  const quiet=now-lastInput>3.5,motion=!reduced.matches;
- if(motion&&!action&&quiet&&now>nextIdle){action=['look','sniff','stretch','wag'][Math.floor(Math.random()*4)];actionStart=now;stage.dataset.activity=action;}
+ if(motion&&!action&&quiet&&now>nextIdle){action=['look','sniff','stretch'][Math.floor(Math.random()*4)];actionStart=now;stage.dataset.activity=action;}
  let yaw=!quiet?pointer.x*.40:0,pitch=!quiet?pointer.y*.18:0,tilt=0,wag=0,lean=0;
  const breath=motion?Math.sin(now*1.65):0;
  if(action&&motion){
@@ -53,13 +53,32 @@ try{
  renderer=new T.WebGLRenderer({antialias:true,alpha:false,powerPreference:'default'});
  renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setClearColor('#ffffff');renderer.outputColorSpace=T.SRGBColorSpace;
  renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
- renderer.shadowMap.enabled=true;renderer.shadowMap.type=T.PCFSoftShadowMap;
- stage.append(renderer.domElement);scene=new T.Scene();camera=new T.PerspectiveCamera(37,1,.1,50);camera.position.set(0,1.65,6.1);camera.lookAt(0,1.14,-.12);
+ renderer.localClippingEnabled=true;renderer.shadowMap.enabled=true;renderer.shadowMap.type=T.PCFSoftShadowMap;
+ stage.append(renderer.domElement);scene=new T.Scene();camera=new T.PerspectiveCamera(37,1,.1,50);camera.position.set(0,1.68,4.7);camera.lookAt(0,1.68,0);
  scene.add(new T.HemisphereLight('#fff9f1','#9c948b',2.0));
  const key=new T.DirectionalLight('#fff4e5',2.5);key.position.set(-3,6,5);key.castShadow=true;key.shadow.mapSize.set(1024,1024);key.shadow.radius=4;key.shadow.camera.left=-2;key.shadow.camera.right=2;key.shadow.camera.top=4;key.shadow.camera.bottom=-1;key.shadow.normalBias=.03;key.shadow.bias=-.0001;scene.add(key);
  const fill=new T.DirectionalLight('#e5edff',1.4);fill.position.set(4,3,-3);scene.add(fill);
- const ground=new T.Mesh(new T.PlaneGeometry(200,200),new T.ShadowMaterial({opacity:.10}));ground.rotation.x=-Math.PI/2;ground.position.y=-.015;ground.receiveShadow=true;scene.add(ground);
- rig=makeDog();scene.add(rig.dog);
+ // A hole cut into a vertical wall; the dog remains a real 3D animated model.
+ const lowerEdge=1.10, holeCenter=1.72, wallDepth=.30;
+ const clippingPlane=new T.Plane(new T.Vector3(0,1,0),-lowerEdge);
+ rig=makeDog();rig.dog.position.z=.32;rig.tailBones[0].parent.visible=false;
+ rig.dog.traverse(object=>{
+  if(!object.isMesh)return;
+  for(const material of (Array.isArray(object.material)?object.material:[object.material])){
+   material.clippingPlanes=[clippingPlane];material.clipShadows=true;
+  }
+ });
+ scene.add(rig.dog);
+ const shape=new T.Shape();
+ shape.moveTo(-8,-5);shape.lineTo(8,-5);shape.lineTo(8,7);shape.lineTo(-8,7);shape.closePath();
+ const opening=new T.Path();
+ // An uneven opening, close to the head instead of a circular frame.
+ const edge=[[-.69,1.36],[-.65,1.19],[-.47,1.09],[-.20,1.12],[.08,1.08],[.36,1.11],[.59,1.20],[.67,1.37],[.65,1.57],[.69,1.80],[.64,2.04],[.51,2.25],[.29,2.37],[-.03,2.40],[-.29,2.35],[-.53,2.24],[-.66,2.03],[-.69,1.80],[-.65,1.57]];
+ opening.moveTo(...edge[0]);for(const point of edge.slice(1))opening.lineTo(...point);opening.closePath();shape.holes.push(opening);
+ const wall=new T.Mesh(new T.ExtrudeGeometry(shape,{depth:.10,bevelEnabled:false,curveSegments:32}),new T.MeshStandardMaterial({color:'#eee8df',roughness:1,side:T.DoubleSide}));
+ wall.position.z=wallDepth;scene.add(wall);
+ const back=new T.Mesh(new T.PlaneGeometry(4,4),new T.MeshStandardMaterial({color:'#a8998a',roughness:1}));
+ back.position.set(0,holeCenter,-.85);scene.add(back);
  stage.dataset.mesh='skinned-3d';stage.dataset.activity='rest';stage.dataset.vertices=String(rig.mesh.geometry.attributes.position.count);
  const now=performance.now()/1000;nextIdle=now+4.5;nextBlink=now+2;resize();start();
 }catch(error){reportError(error);}
@@ -79,7 +98,7 @@ stage.addEventListener('pointerup',event=>{
  if(moved>8)return;
  hitPointer.set((event.clientX-box.left)/box.width*2-1,-(event.clientY-box.top)/box.height*2+1);
  raycaster.setFromCamera(hitPointer,camera);
- if(raycaster.intersectObject(rig.dog,true).length)activity('pat');
+ if(raycaster.intersectObject(rig.dog,true).some(hit=>hit.point.y>=1.10))activity('pat');
 });
 stage.addEventListener('pointercancel',()=>{tapStart=null;});
 stage.addEventListener('keydown',event=>{if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Escape'].includes(event.key)){event.preventDefault();pointer={x:({ArrowLeft:-1,ArrowRight:1})[event.key]||0,y:({ArrowUp:-1,ArrowDown:1})[event.key]||0};lastInput=performance.now()/1000;start();}if(event.key===' '||event.key==='Enter'){event.preventDefault();activity('pat');}});

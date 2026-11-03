@@ -55,6 +55,12 @@ class WebChatTest(unittest.TestCase):
     def state(self): return self.request('GET','/api/session')[2]
     def test_assets_host_origin_and_input_boundaries(self):
         self.assertEqual(self.request('GET','/')[0],200)
+        for asset in ('/reminder-notifications.js', '/pet3d.js', '/companion3d/model.js', '/companion3d/vendor/three.module.js', '/companion3d/vendor/three.core.js'):
+            status, headers, body = self.request('GET', asset)
+            self.assertEqual(status, 200)
+            self.assertTrue(headers['Content-Type'].startswith('text/javascript'))
+            self.assertTrue(body)
+        self.assertEqual(self.request('GET', '/companion3d/../../chat_local.py')[0], 404)
         self.assertEqual(self.request('GET','/../chat_local.py')[0],404)
         self.assertEqual(self.request('GET','/',extra={'Host':'untrusted.example'})[0],403)
         self.assertEqual(self.request('POST','/api/clear',{'chat_id':self.chat},{'Origin':'http://untrusted.example'})[0],403)
@@ -113,7 +119,7 @@ class WebChatTest(unittest.TestCase):
         data=self.request('POST','/api/tasks/add',{'title':'整理项目思路'})[2]
         task=data['tasks'][0]
         self.request('POST','/api/tasks/toggle',{'id':task['id'],'done':True})
-        profile={'name':'测试空间','pet_name':'小团','pet_motion':False,'avatar':PNG}
+        profile={'name':'测试空间','pet_name':'小团','pet_motion':False,'pet_kind':'cat','avatar':PNG}
         self.assertEqual(self.request('POST','/api/profile',profile)[0],200)
         self.send('重启之后还要在')
         self.stop(); self.start()
@@ -125,9 +131,16 @@ class WebChatTest(unittest.TestCase):
         self.assertEqual(self.state()['tasks'][0]['done'],0)
         self.request('POST','/api/tasks/delete',{'id':task['id']})
         self.assertEqual(self.state()['tasks'],[])
+    def test_pet_selection_legacy_payload_preserves_saved_cat(self):
+        profile = {**self.state()['profile'], 'pet_kind': 'cat'}
+        self.assertEqual(self.request('POST', '/api/profile', profile)[0], 200)
+        profile.pop('pet_kind')
+        self.assertEqual(self.request('POST', '/api/profile', profile)[0], 200)
+        self.assertEqual(self.state()['profile']['pet_kind'], 'cat')
+
     def test_invalid_profile_and_tasks_do_not_overwrite(self):
         profile=self.state()['profile']
-        for data in [{**profile,'name':''},{**profile,'pet_motion':'yes'},{**profile,'avatar':'data:image/svg+xml;base64,PHN2Zz4='},{**profile,'avatar':PNG+'!'}]:
+        for data in [{**profile,'pet_kind':'dragon'},{**profile,'name':''},{**profile,'pet_motion':'yes'},{**profile,'avatar':'data:image/svg+xml;base64,PHN2Zz4='},{**profile,'avatar':PNG+'!'}]:
             self.assertEqual(self.request('POST','/api/profile',data)[0],400)
         self.assertEqual(self.state()['profile'],profile)
         self.assertEqual(self.request('POST','/api/tasks/add',{'title':'x'*161})[0],400)
