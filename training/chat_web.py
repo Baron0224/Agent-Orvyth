@@ -102,6 +102,20 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_response(200, {"ready": False, "message": "请先打开 Ollama，再点检查连接。"})
             return
         assets = {"/particle-field.js": ("particle-field.js", "text/javascript"), "/assets/particle-ribbon.png": ("assets/particle-ribbon.png", "image/png"), "/": ("index.html", "text/html"), "/start": ("start.html", "text/html"), "/start.css": ("start.css", "text/css"), "/start.js": ("start.js", "text/javascript"), "/app.js": ("app.js", "text/javascript"), "/styles.css": ("styles.css", "text/css")}
+        companion_files = {
+            "/reminder-notifications.js": ASSETS / "reminder-notifications.js",
+            "/pet3d.js": ASSETS / "pet3d.js",
+            "/companion3d/model.js": ASSETS.parent / "companion-preview" / "dog" / "3d" / "model.js",
+            "/companion3d/vendor/three.module.js": ASSETS.parent / "companion-preview" / "dog" / "3d" / "vendor" / "three.module.js",
+            "/companion3d/vendor/three.core.js": ASSETS.parent / "companion-preview" / "dog" / "3d" / "vendor" / "three.core.js",
+        }
+        if self.path in companion_files:
+            body = companion_files[self.path].read_bytes()
+            self.headers_for(200, "text/javascript; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path not in assets:
             self.json_response(404, {"error": "页面不存在。"})
             return
@@ -174,6 +188,17 @@ class Handler(BaseHTTPRequestHandler):
     def stream_reply(self, owner, chat, payload):
         question = Store.text(payload.get("message"), 2000, "消息")
         history = self.server.store.history(owner, chat)
+        reminder = self.server.store.reminder_chat(owner, chat, question)
+        if reminder is not None:
+            self.headers_for(200, "application/x-ndjson; charset=utf-8")
+            self.end_headers()
+            try:
+                for event in ({"type":"delta","content":reminder}, {"type":"done","chat_id":chat}):
+                    self.wfile.write((json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8"))
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass
+            return
         if not self.server.generation_lock.acquire(blocking=False):
             self.json_response(503, {"error": "模型正在回答另一条消息，请稍后重试。"})
             return

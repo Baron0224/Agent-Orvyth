@@ -1166,3 +1166,24 @@ dialog p {
   font-size:17px;
   font-family:Georgia,serif
 }
+
+/* 3D 小狗与墙洞 */
+.pet { border-radius: 14px; overflow: hidden; }
+.pet canvas { display:block; width:100%; height:100%; }
+.pet-fallback { position:absolute; inset:0; display:grid; place-items:center; color:#8c8177; font-size:11px; }
+.pet.is-ready .pet-fallback { display:none; }
+
+/* 每条已完成的回答可单独复制。 */
+.message-copy { display:inline-flex; margin-top:7px; padding:5px 9px; border:1px solid transparent; border-radius:7px; background:transparent; color:#858585; font-size:11px; line-height:1.4; }
+.message-copy:hover, .message-copy:focus-visible { color:#222; background:#f6f6f6; border-color:#eaeaea; }
+
+.task-schedule { display:block; color:#888; font-size:10px; line-height:1.5; text-decoration:none; }
+
+.notification-enable { margin:8px 0 0; padding:7px 10px; border:1px solid #e5e5e5; border-radius:8px; background:#fff; color:#555; font-size:11px; }
+.notification-enable:hover { background:#f6f6f6; }
+.notification-status { margin:7px 0 0; color:#888; font-size:10px; line-height:1.6; }
+.reminder-popup { position:fixed; z-index:60; top:20px; right:20px; width:min(320px,calc(100vw - 40px)); padding:16px 18px; border:1px solid #e8e4df; border-radius:14px; background:#fff; color:#333; box-shadow:0 10px 35px #0002; font-size:13px; line-height:1.6; }
+.reminder-popup strong { display:block; margin-bottom:5px; }
+.reminder-popup button { float:right; border:0; background:none; color:#777; padding:0 2px 4px 12px; font-size:19px; }
+
+.pet-choice-entry{display:flex;justify-content:space-between;align-items:center;width:100%;padding:20px 0;margin:12px 0;border:0;border-bottom:1px solid #e7e7e7;background:none;text-align:left;cursor:pointer}.pet-choice-entry span:last-child{color:#777}.pet-choice-intro{color:#777;margin:8px 0 24px}.pet-choice-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.pet-choice-card{display:flex;flex-direction:column;align-items:center;gap:10px;border:1px solid #ddd;border-radius:18px;padding:12px 12px 22px;background:#faf9f7;cursor:pointer}.pet-choice-card[aria-pressed="true"]{border:2px solid #846e53;background:#f5efe6}.pet-choice-card img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:12px}.pet-choice-card span{color:#777;font-size:12px}.pet-choice-card:focus-visible{outline:2px solid #846e53;outline-offset:3px}

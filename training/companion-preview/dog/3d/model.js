@@ -1,4 +1,4 @@
-import * as T from 'three';
+import * as T from './vendor/three.module.js';
 
 // A smooth union surface forms one connected torso, neck and head. No image layers.
 const smooth=(a,b,x)=>{const t=T.MathUtils.clamp((x-a)/(b-a),0,1);return t*t*(3-2*t);};
@@ -99,4 +99,88 @@ export function makeDog(){
  const tail=new T.SkinnedMesh(tailGeo,new T.MeshStandardMaterial({vertexColors:true,roughness:.96}));tail.add(tailBones[0]);tail.bind(new T.Skeleton(tailBones));tail.castShadow=true;dog.add(tail);
  ball(tailBones[4],[0,0,0],[.13,.13,.13],orange);
  return {dog,root,spine,neck,head,eyes,eyeHeight:.065,tailBones,mesh};
+}
+
+
+// Calico kitten: rounded silhouette, broad glossy eyes and short layered fur.
+export function makeCat(){
+ const dog=new T.Group(),root=new T.Bone(),spine=new T.Bone(),neck=new T.Bone(),head=new T.Bone();
+ spine.position.y=.8;neck.position.y=.4;head.position.y=.22;dog.add(root);root.add(spine);spine.add(neck);neck.add(head);
+ const cream=new T.MeshStandardMaterial({color:'#fff4df',roughness:.93});
+ const charcoal=new T.MeshStandardMaterial({color:'#30261f',roughness:.92});
+ const pink=new T.MeshStandardMaterial({color:'#d89280',roughness:.83});
+ const mouthMat=new T.MeshStandardMaterial({color:'#755247',roughness:1});
+ const black=new T.MeshPhysicalMaterial({color:'#0c0b09',roughness:.12,clearcoat:1,clearcoatRoughness:.08});
+ const gold=new T.MeshPhysicalMaterial({color:'#af8438',roughness:.29,clearcoat:.7});
+ const highlight=new T.MeshBasicMaterial({color:'#fffdf5'});
+ const sphere=new T.SphereGeometry(1,64,48);
+ function ball(parent,x,y,z,sx,sy,sz,mat){const m=new T.Mesh(sphere,mat);m.position.set(x,y,z);m.scale.set(sx,sy,sz);parent.add(m);m.castShadow=true;return m;}
+ let seed=71831;const rand=()=>{seed=(1664525*seed+1013904223)>>>0;return seed/4294967296;};
+ const white=new T.Color('#f9efdf'),orange=new T.Color('#d9954e'),dark=new T.Color('#332922');
+ function coat(x,y,z,body=false){
+  const ripple=.045*Math.sin(y*29+x*17)+.02*Math.sin(x*57-z*21);
+  if(body){
+   if(z>.15&&Math.abs(x)<.65-y*.12+ripple)return white.clone();
+   return (Math.sin(x*5+y*8+z*4)>-.05?orange:dark).clone();
+  }
+  // White muzzle and a narrow irregular blaze up the centre of the forehead.
+  const blaze=.11+Math.max(0,.18-y)*.58+ripple;
+  if(z>.18&&(Math.abs(x)<blaze||y<-.28+ripple))return white.clone();
+  const patch=x<-.12 ? .8+Math.sin(y*12+z*5)*.38 : Math.sin(x*9+y*7+z*3)*.6-.2;
+  return orange.clone().lerp(dark,T.MathUtils.smoothstep(patch,.1,.55));
+ }
+ function furry(parent,pos,size,body=false,count=6000){
+  const geo=sphere.clone(),colors=[],v=new T.Vector3();
+  for(let i=0;i<geo.attributes.position.count;i++){v.fromBufferAttribute(geo.attributes.position,i);const c=coat(v.x,v.y,v.z,body);colors.push(c.r,c.g,c.b);}
+  geo.setAttribute('color',new T.Float32BufferAttribute(colors,3));
+  const mesh=new T.Mesh(geo,new T.MeshStandardMaterial({vertexColors:true,roughness:.98}));mesh.position.set(...pos);mesh.scale.set(...size);mesh.castShadow=true;parent.add(mesh);
+  const points=[],hairColors=[];
+  for(let i=0;i<count;i++){
+   const y=rand()*2-1,a=rand()*Math.PI*2,r=Math.sqrt(1-y*y),x=Math.cos(a)*r,z=Math.sin(a)*r;
+   const c=coat(x,y,z,body).multiplyScalar(.95+rand()*.10),length=.005+rand()*.010;
+   const bx=pos[0]+x*size[0],by=pos[1]+y*size[1],bz=pos[2]+z*size[2];
+   points.push(bx,by,bz,bx+x*length,by+y*length-length*.25,bz+z*length);
+   hairColors.push(c.r,c.g,c.b,c.r,c.g,c.b);
+  }
+  const hairs=new T.BufferGeometry();hairs.setAttribute('position',new T.Float32BufferAttribute(points,3));hairs.setAttribute('color',new T.Float32BufferAttribute(hairColors,3));
+  parent.add(new T.LineSegments(hairs,new T.LineBasicMaterial({vertexColors:true,transparent:true,opacity:.25})));
+  return mesh;
+ }
+ furry(spine,[0,.34,.03],[.32,.48,.29],true,4000);
+ const mesh=furry(head,[0,.33,.12],[.48,.405,.365],false,14000);
+ // Rounded tapered ears, coloured outer shell and recessed peach interior.
+ for(const side of [-1,1]){
+  const shape=new T.Shape();shape.moveTo(side*.20,.55);
+  shape.bezierCurveTo(side*.21,.70,side*.32,.96,side*.38,.91);
+  shape.bezierCurveTo(side*.48,.83,side*.49,.64,side*.43,.49);shape.closePath();
+  const ear=new T.Mesh(new T.ExtrudeGeometry(shape,{depth:.075,bevelEnabled:true,bevelSegments:5,steps:1,bevelSize:.027,bevelThickness:.03,curveSegments:24}),charcoal);ear.position.z=.06;ear.castShadow=true;head.add(ear);
+  const inner=new T.Shape();inner.moveTo(side*.255,.60);inner.bezierCurveTo(side*.29,.74,side*.35,.87,side*.377,.85);inner.bezierCurveTo(side*.435,.78,side*.435,.65,side*.405,.575);inner.closePath();
+  const inset=new T.Mesh(new T.ShapeGeometry(inner,24),new T.MeshStandardMaterial({color:'#dca08b',roughness:.95,side:T.DoubleSide}));inset.position.z=.18;head.add(inset);
+  for(let i=0;i<20;i++){
+   const y=.59+i*.011,x=side*(.40-(y-.59)*.15);
+   const curl=new T.CatmullRomCurve3([new T.Vector3(x,y,.19),new T.Vector3(x-side*.022,y+.015,.205),new T.Vector3(x-side*(.045+rand()*.024),y+.021,.20)]);
+   head.add(new T.Mesh(new T.TubeGeometry(curl,5,.0012,3,false),cream));
+  }
+ }
+ const eyes=[];
+ for(const side of [-1,1]){
+  ball(head,side*.194,.352,.432,.141,.153,.070,charcoal);
+  const eye=ball(head,side*.194,.352,.452,.125,.137,.065,gold);eyes.push(eye);
+  ball(eye,0,.035,.53,.79,.86,.68,black);
+  ball(eye,-.32,.46,1.08,.19,.19,.08,highlight);
+  ball(eye,.30,-.33,1.12,.065,.065,.04,highlight);
+  // Small soft muzzle; broad white colouring is carried by the head itself.
+  ball(head,side*.066,.145,.452,.085,.066,.041,cream);
+  for(let line=0;line<3;line++){
+   const y=.16-line*.029;
+   const curve=new T.CatmullRomCurve3([new T.Vector3(side*.125,y,.47),new T.Vector3(side*.30,y+.016,.48),new T.Vector3(side*.52,y+.03-line*.025,.40)]);
+   head.add(new T.Mesh(new T.TubeGeometry(curve,14,.0013,4,false),cream));
+  }
+ }
+ const noseShape=new T.Shape();noseShape.moveTo(-.033,.205);noseShape.quadraticCurveTo(0,.216,.033,.205);noseShape.quadraticCurveTo(.02,.19,0,.175);noseShape.quadraticCurveTo(-.02,.19,-.033,.205);
+ const nose=new T.Mesh(new T.ExtrudeGeometry(noseShape,{depth:.009,bevelEnabled:true,bevelSegments:3,bevelSize:.006,bevelThickness:.004}),pink);nose.position.z=.498;head.add(nose);
+ const lipPaths=[[[0,.18,.503],[0,.146,.504]],[[0,.146,.504],[-.022,.125,.49],[-.049,.121,.484]],[[0,.146,.504],[.022,.125,.49],[.049,.121,.484]]];
+ for(const points of lipPaths){const curve=new T.CatmullRomCurve3(points.map(p=>new T.Vector3(...p)));head.add(new T.Mesh(new T.TubeGeometry(curve,10,.002,5,false),mouthMat));}
+ const tailGroup=new T.Group(),tailBones=[new T.Bone()];tailGroup.add(tailBones[0]);dog.add(tailGroup);
+ return {dog,root,spine,neck,head,eyes,eyeHeight:.137,tailBones,mesh};
 }

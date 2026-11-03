@@ -6,6 +6,64 @@ let state = null, activeChat = null, busy = false, ready = false, initialized = 
 let draftAvatar = '', managingChat = null, petTimer = null, confirmResolve = null;
 const taskBusy = new Set();
 function setNotice(text = '') { notice.textContent = text; }
+const notificationButton = $('#enable-notifications'), notificationStatus = $('#notification-status');
+const notifier = window.OrvythNotifications.create({
+  Notification: window.Notification, storage: window.localStorage,
+  focus: () => window.focus(),
+  failed: () => { notificationStatus.textContent = '系统通知未能显示，请检查浏览器和电脑的通知设置。'; }
+});
+const shownReminders = new Set();
+function notificationSettings() {
+  const permission = notifier.permission();
+  notificationButton.hidden = permission === 'unsupported';
+  notificationButton.disabled = permission === 'denied';
+  notificationButton.textContent = permission === 'granted' ? '测试桌面通知' : '开启桌面通知';
+  notificationStatus.textContent = permission === 'unsupported' ? '当前浏览器不支持桌面通知，可换用 Chrome 或 Edge。' :
+    permission === 'denied' ? '通知被阻止，请在浏览器设置中允许。' :
+    permission === 'granted' ? '浏览器已允许通知。请点上方按钮测试，并确认电脑右下角是否出现通知。页面需保持打开。' : '点击开启后，请在浏览器的提示中选择允许；页面需保持打开。';
+}
+function reminderKey(task) { return `${task.id}:${task.due_at ?? task.occurrence_date}`; }
+function showReminderPopup(tasks) {
+  const old = document.querySelector('.reminder-popup'); if (old) old.remove();
+  const popup = document.createElement('div'); popup.className = 'reminder-popup'; popup.setAttribute('role', 'alert');
+  const close = document.createElement('button'); close.type = 'button'; close.setAttribute('aria-label', '关闭提醒'); close.textContent = '×';
+  close.addEventListener('click', () => popup.remove());
+  const title = document.createElement('strong'); title.textContent = 'Orvyth 网页提醒';
+  const content = document.createElement('span'); content.textContent = `时间到：${tasks.map(task => task.title).join('、')}`;
+  popup.append(close, title, content); document.body.append(popup);
+}
+function deliverReminders(tasks) {
+  const due = tasks.filter(task => task.remind_due && !task.done && !task.waiting);
+  const fresh = due.filter(task => !shownReminders.has(reminderKey(task)));
+  fresh.forEach(task => shownReminders.add(reminderKey(task)));
+  if (fresh.length) {
+    const text = `时间到：${fresh.map(task => task.title).join('、')}`;
+    $('#task-notice').textContent = text;
+    if (!busy) setPet('happy', text);
+    showReminderPopup(fresh);
+  }
+  due.forEach(task => notifier.notify(task));
+}
+notificationButton.addEventListener('click', async () => {
+  if (!notifier.supported()) return;
+  const waiting = setTimeout(() => {
+    notificationStatus.textContent = '正在等待浏览器授权，请查看地址栏附近是否有通知权限提示。';
+  }, 2000);
+  try {
+    const permission = await Notification.requestPermission();
+    clearTimeout(waiting);
+    notificationSettings();
+    if (permission === 'granted') {
+      notifier.retry();
+      const test = new Notification('Orvyth 通知已开启', {body:'提醒到时间时，会像这样弹出。', tag:'orvyth-notification-test'});
+      test.onclick = () => { window.focus(); test.close(); };
+      test.onshow = () => { notificationStatus.textContent = '浏览器已发送测试，请确认电脑右下角是否真的出现通知。页面需保持打开。'; };
+      test.onerror = () => { notificationStatus.textContent = '测试通知未显示，请检查浏览器和电脑通知设置。'; };
+      if (state) deliverReminders(state.tasks);
+    }
+  } catch { clearTimeout(waiting); notificationStatus.textContent = '暂时无法开启桌面通知，请检查浏览器和电脑的通知设置。'; }
+});
+notificationSettings();
 function controls() {
   send.disabled = busy || !ready || !initialized || !input.value.trim();
   clear.disabled = busy || !initialized || !messages.children.length;
@@ -30,7 +88,7 @@ function paintAvatar(target, avatar, name) {
     target.append(image);
   } else target.textContent = Array.from(name === '我的空间' ? '我' : name || '我')[0];
 }
-function addMessage(role, text = '') {
+function addMessage(role, text = '', complete = true) {
   $('#welcome').hidden = true;
   const entry = document.createElement('article'); entry.className = `message ${role}`;
   const label = document.createElement('div'); label.className = 'label';
@@ -41,7 +99,22 @@ function addMessage(role, text = '') {
   name.textContent = role === 'user' ? (state?.profile.name === '我的空间' ? '你' : state?.profile.name || '你') : 'Orvyth';
   label.append(avatar, name);
   const body = document.createElement('div'); body.className = 'body'; body.textContent = text;
-  entry.append(label, body); messages.append(entry); return {entry, body};
+  entry.append(label, body);
+  let copy = null;
+  if (role === 'assistant') {
+    copy = document.createElement('button'); copy.type = 'button'; copy.className = 'message-copy';
+    copy.textContent = '复制'; copy.setAttribute('aria-label', '复制这条回答'); copy.hidden = !complete || !text;
+    copy.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(body.textContent);
+        copy.textContent = '已复制'; copy.setAttribute('aria-label', '回答已复制');
+        clearTimeout(copy.resetTimer);
+        copy.resetTimer = setTimeout(() => { copy.textContent = '复制'; copy.setAttribute('aria-label', '复制这条回答'); }, 1800);
+      } catch { setNotice('复制失败，请选中回答后手动复制。'); }
+    });
+    entry.append(copy);
+  }
+  messages.append(entry); return {entry, body, copy};
 }
 async function requestJSON(path, body) {
   const response = await fetch(path, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
@@ -54,6 +127,8 @@ function renderProfile() {
   $('#profile-name').textContent = profile.name;
   paintAvatar($('#user-avatar'), profile.avatar, profile.name);
   $('#pet-name').textContent = profile.pet_name;
+  $('#pet').dataset.kind=profile.pet_kind || 'dog';
+  window.dispatchEvent(new CustomEvent('orvyth-pet-change',{detail:profile.pet_kind || 'dog'}));
   $('#pet').setAttribute('aria-label', `和${profile.pet_name}互动`);
   document.body.classList.toggle('motion-off', !profile.pet_motion);
   document.querySelectorAll('.message.user .message-avatar').forEach(avatar => paintAvatar(avatar,profile.avatar,profile.name));
@@ -74,17 +149,26 @@ function renderHistory() {
 }
 function taskRow(task) {
   const row = document.createElement('li'); row.className = 'task-row';
-  const check = document.createElement('input'); check.type = 'checkbox'; check.checked = !!task.done; check.id = `task-${task.id}`; check.disabled = taskBusy.has(task.id);
-  const label = document.createElement('label'); label.htmlFor = check.id; label.textContent = task.title;
+  const check = document.createElement('input'); check.type = 'checkbox'; check.checked = !!task.done && !task.waiting; check.id = `task-${task.id}`; check.disabled = taskBusy.has(task.id) || !!task.waiting || !!task.expired;
+  const label = document.createElement('label'); label.htmlFor = check.id;
+  const title = document.createElement('span'); title.textContent = task.title; label.append(title);
+  if (task.remind_time) {
+    const detail = document.createElement('small'); detail.className = 'task-schedule';
+    const duration = task.end_date === task.start_date ? '一次' : (task.end_date ? `每天 · 至 ${task.end_date}` : '每天');
+    const due = task.due_at ? new Date(task.due_at * 1000).toLocaleString('zh-CN', {hour12:false}) : task.remind_time;
+    detail.textContent = task.expired ? '周期已结束' : (task.waiting ? `等待 ${due} · ${duration}` : `${duration} · ${due}`);
+    label.append(detail);
+  }
   check.addEventListener('change', () => updateTask(task, 'toggle', {done:check.checked}));
   const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×'; remove.setAttribute('aria-label', `删除任务：${task.title}`); remove.disabled = taskBusy.has(task.id);
   remove.addEventListener('click', () => updateTask(task, 'delete'));
   row.append(check, label, remove); return row;
 }
 function renderTasks() {
-  const pending = state.tasks.filter(task => !task.done), done = state.tasks.filter(task => task.done);
-  $('#tasks-pending').replaceChildren(...pending.map(taskRow)); $('#tasks-done').replaceChildren(...done.map(taskRow));
-  $('#tasks-empty').hidden = pending.length > 0;
+  const pending = state.tasks.filter(task => !task.done && !task.waiting), waiting = state.tasks.filter(task => task.waiting), done = state.tasks.filter(task => task.done && !task.waiting);
+  $('#tasks-pending').replaceChildren(...pending.map(taskRow)); $('#tasks-scheduled').replaceChildren(...waiting.map(taskRow)); $('#tasks-done').replaceChildren(...done.map(taskRow));
+  $('#scheduled-tasks').hidden = !waiting.length; $('#scheduled-label').textContent = `即将提醒 (${waiting.length})`;
+  $('#tasks-empty').hidden = pending.length > 0 || waiting.length > 0;
   $('#task-count').textContent = String(pending.length);
   $('#completed-tasks').hidden = !done.length; $('#completed-label').textContent = `已完成 (${done.length})`;
 }
@@ -113,7 +197,9 @@ async function checkConnection() {
 }
 async function initialize() {
   try {
-    const data = await requestJSON('/api/session'); initialized = true; applyState(data, true); await checkConnection();
+    const data = await requestJSON('/api/session'); initialized = true; applyState(data, true);
+    deliverReminders(data.tasks);
+    await checkConnection();
   } catch (error) { setNotice(error.message || '连接失败，请刷新页面。'); $('#reconnect').hidden = false; }
   controls();
 }
@@ -136,7 +222,7 @@ async function submit(text) {
   if (text.length > 2000) { setNotice('一次最多发送 2000 字，请拆短一些。'); return; }
   busy = true; setNotice(); input.value = ''; resize();
   const conversation = activeChat;
-  addMessage('user', text); const answer = addMessage('assistant', '正在想怎么回答…');
+  addMessage('user', text); const answer = addMessage('assistant', '正在想怎么回答…', false);
   answer.entry.classList.add('pending'); follow(true); setPet('thinking', '这句话我听见了，正在认真想。');
   let output = '', done = false;
   try {
@@ -161,6 +247,7 @@ async function submit(text) {
       }
       if (buffer.trim()) consume(buffer);
       if (!done || !output) throw new Error('回复中断，请稍后重试。');
+      answer.copy.hidden = false;
     } finally { await reader.cancel().catch(() => {}); }
     try { applyState(await requestJSON('/api/session')); } catch { setNotice('回答已收到，列表暂时未刷新。'); }
     input.focus(); setPet('idle', '我听着呢，想继续说就接着说。');
@@ -201,6 +288,7 @@ function openSettings() {
   if (!state) return;
   $('#profile-menu').hidden = true; $('#profile-button').setAttribute('aria-expanded','false');
   const profile = state.profile; draftAvatar = profile.avatar;
+  selectPetDraft(profile.pet_kind || 'dog');
   $('#name-input').value = profile.name; $('#pet-name-input').value = profile.pet_name; $('#motion-input').checked = profile.pet_motion;
   paintAvatar($('#avatar-edit'), draftAvatar, profile.name); $('#settings-error').textContent = ''; $('#settings-dialog').showModal();
 }
@@ -243,7 +331,7 @@ $('#settings-form').noValidate = true;
 $('#settings-form').addEventListener('submit', async event => {
   event.preventDefault(); $('#settings-save').disabled = true; $('#settings-error').textContent = '';
   try {
-    const data = await requestJSON('/api/profile',{name:$('#name-input').value,pet_name:$('#pet-name-input').value,pet_motion:$('#motion-input').checked,avatar:draftAvatar});
+    const data = await requestJSON('/api/profile',{name:$('#name-input').value,pet_name:$('#pet-name-input').value,pet_motion:$('#motion-input').checked,pet_kind:$('#pet-kind-input').value,avatar:draftAvatar});
     applyState(data); $('#settings-dialog').close(); setNotice('设置已保存在本机。');
   } catch(error) { $('#settings-error').textContent = error.message; }
   finally { $('#settings-save').disabled = false; }
@@ -272,11 +360,27 @@ $('#close-pet').addEventListener('click', closeDrawers); $('#drawer-shade').addE
 document.addEventListener('keydown', event => { if (event.key === 'Escape') { closeDrawers(); $('#profile-menu').hidden = true; } });
 $('#pet').addEventListener('click',interactPet); $('#pet-pat').addEventListener('click',interactPet);
 $('#pet-talk').addEventListener('click', () => { closeDrawers(); input.focus(); setPet('happy','我听着呢，先说你最想说的那句。'); });
-let pointerPending = false, pointerX = 0, pointerY = 0;
-document.addEventListener('pointermove', event => {
-  if (!state?.profile.pet_motion || reducedMotion.matches) return; pointerX = event.clientX; pointerY = event.clientY;
-  if (pointerPending) return; pointerPending = true;
-  requestAnimationFrame(() => { const pet = $('#pet'), box = pet.getBoundingClientRect(); pet.style.setProperty('--look-x',`${Math.max(-3,Math.min(3,(pointerX-box.left-box.width/2)/50))}px`); pet.style.setProperty('--look-y',`${Math.max(-2,Math.min(2,(pointerY-box.top-box.height/2)/70))}px`); pointerPending=false; });
-});
+let checkingReminders = false;
+async function refreshReminders() {
+  if (checkingReminders || !initialized || !state?.tasks.some(task => task.remind_time)) return;
+  checkingReminders = true;
+  try {
+    const data = await requestJSON('/api/session');
+    deliverReminders(data.tasks);
+    // Avoid changing the chat UI during streaming; the notification still arrives.
+    if (!busy) applyState(data);
+  } catch {} finally { checkingReminders = false; }
+}
+setInterval(refreshReminders, 5000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshReminders(); });
 setInterval(() => { if (!document.hidden && !busy && initialized && !document.querySelector('dialog[open]')) setPet('idle', state.tasks.some(task => !task.done) ? '待办我替你记着，想聊也随时可以说。' : '安静待一会儿也没关系，我在这儿。'); },60000);
 initialize();
+
+function selectPetDraft(kind){
+ $('#pet-kind-input').value=kind;
+ $('#chosen-pet-label').textContent=kind==='cat'?'小猫 ›':'小柴犬 ›';
+ document.querySelectorAll('[data-pet-kind]').forEach(card=>card.setAttribute('aria-pressed',String(card.dataset.petKind===kind)));
+}
+$('#choose-pet').addEventListener('click',()=>$('#pet-choice-dialog').showModal());
+$('#pet-choice-close').addEventListener('click',()=>$('#pet-choice-dialog').close());
+document.querySelectorAll('[data-pet-kind]').forEach(card=>card.addEventListener('click',()=>{selectPetDraft(card.dataset.petKind);$('#pet-choice-dialog').close();}));
