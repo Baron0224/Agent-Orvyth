@@ -88,6 +88,18 @@ function paintAvatar(target, avatar, name) {
     target.append(image);
   } else target.textContent = Array.from(name === '我的空间' ? '我' : name || '我')[0];
 }
+function formatAssistantText(text) {
+  if (text.includes('```')) return text;
+  const lines = text.split('\n');
+  const isList = line => /^\s*(?:[-*•]\s+|\d+[.、)]\s*|[👉●◆])/.test(line);
+  return lines.map((line, i) => {
+    if (!i) return line;
+    const previous = lines[i - 1];
+    if (!line.trim() || !previous.trim() || isList(line) || isList(previous)) return '\n' + line;
+    const separator = /[\u3400-\u9fff，。！？；：、]$/.test(previous.trimEnd()) && /^[\u3400-\u9fff]/.test(line.trimStart()) ? '' : ' ';
+    return separator + line.trimStart();
+  }).join('');
+}
 function addMessage(role, text = '', complete = true) {
   $('#welcome').hidden = true;
   const entry = document.createElement('article'); entry.className = `message ${role}`;
@@ -98,7 +110,7 @@ function addMessage(role, text = '', complete = true) {
   const name = document.createElement('span');
   name.textContent = role === 'user' ? (state?.profile.name === '我的空间' ? '你' : state?.profile.name || '你') : 'Orvyth';
   label.append(avatar, name);
-  const body = document.createElement('div'); body.className = 'body'; body.textContent = text;
+  const body = document.createElement('div'); body.className = 'body'; body.textContent = role === 'assistant' ? formatAssistantText(text) : text;
   entry.append(label, body);
   let copy = null;
   if (role === 'assistant') {
@@ -236,7 +248,7 @@ async function submit(text) {
       if (event.type === 'delta') {
         if (!output) setPet('speaking', '想好一点，就先说给你听。');
         const nearBottom = area.scrollHeight - area.scrollTop - area.clientHeight < 180;
-        output += event.content; answer.entry.classList.remove('pending'); answer.body.textContent = output; follow(nearBottom);
+        output += event.content; answer.entry.classList.remove('pending'); answer.body.textContent = formatAssistantText(output); follow(nearBottom);
       }
     };
     try {
