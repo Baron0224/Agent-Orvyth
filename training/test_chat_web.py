@@ -53,6 +53,32 @@ class WebChatTest(unittest.TestCase):
         with patch('chat_web.LocalChat.reply',fake_reply):
             return self.request('POST','/api/chat',{'chat_id':chat or self.chat,'message':message})
     def state(self): return self.request('GET','/api/session')[2]
+    def test_lookup_does_not_append_citation_footer(self):
+        source = {'title': '测试百科', 'url': 'https://example.org/source', 'extract': '供测试的事实。'}
+        with patch('chat_web.lookup', return_value=source):
+            status, _, events = self.send('恐龙是什么')
+        self.assertEqual(status, 200)
+        answer = ''.join(event.get('content', '') for event in events)
+        self.assertEqual(answer, '测试回答')
+        self.assertEqual(self.state()['messages'][-1]['content'], answer)
+    def test_identity_uses_current_pet_name(self):
+        profile = self.state()['profile']
+        for name in ('小团', '星星'):
+            self.assertEqual(self.request('POST', '/api/profile', {**profile, 'pet_name': name})[0], 200)
+            status, _, events = self.send('你知道你叫什么名字吗')
+            self.assertEqual(status, 200)
+            self.assertIn(name, events[0]['content'])
+            self.assertIn('Orvyth', events[0]['content'])
+            self.assertIn('私人秘书', events[0]['content'])
+            _, _, repeated = self.send('你知道你叫什么名字吗')
+            self.assertNotEqual(events[0]['content'], repeated[0]['content'])
+            self.assertIn(name, repeated[0]['content'])
+    def test_identity_questions_do_not_search(self):
+        with patch('chat_web.lookup', side_effect=AssertionError('identity must not search')):
+            for question in ('你是谁', '你是谁呀', '你是什么人'):
+                status, _, events = self.send(question)
+                self.assertEqual(status, 200)
+                self.assertNotIn('资料来源', events[0]['content'])
     def test_assets_host_origin_and_input_boundaries(self):
         self.assertEqual(self.request('GET','/')[0],200)
         for asset in ('/reminder-notifications.js', '/pet3d.js', '/companion3d/model.js', '/companion3d/vendor/three.module.js', '/companion3d/vendor/three.core.js'):

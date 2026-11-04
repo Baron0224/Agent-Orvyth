@@ -8,7 +8,7 @@ ASK_PATH = '我在本机常用文档和项目目录里暂时没定位到对应�
 
 def local_intent(question):
     return bool(re.search(r'调取|读取|读一下', question) or
-                (re.search(r'打开|查看|看一下|找一下|找到|帮我找|找找|总结|分析', question) and
+                (re.search(r'打开|查看|看一下|找一下|找到|帮我找|找找|总结|分析|修改|编辑|替换|改成|改为', question) and
                  re.search(r'文档|文件|目录|项目|[\w-]+\.[a-zA-Z0-9]{1,8}\b|[A-Za-z]:[\\/]|我.{1,80}(?:中|里)的', question)))
 
 def natural_location(question):

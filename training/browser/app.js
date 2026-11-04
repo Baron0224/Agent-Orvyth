@@ -89,6 +89,8 @@ function paintAvatar(target, avatar, name) {
   } else target.textContent = Array.from(name === '我的空间' ? '我' : name || '我')[0];
 }
 function formatAssistantText(text) {
+  // Hide the old, automatically appended citation footer without changing stored chats.
+  text = text.replace(/\n\n资料来源：[^\n]*?\s+https?:\/\/[^\s]+\s*$/u, '');
   if (text.includes('```')) return text;
   const lines = text.split('\n');
   const isList = line => /^\s*(?:[-*•]\s+|\d+[.、)]\s*|[👉●◆])/.test(line);
