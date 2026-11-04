@@ -27,4 +27,11 @@ class FileChatTests(unittest.TestCase):
         plan=file_request('帮我读取 Z:\\missing-orvyth-test\\file.txt',[])
         self.assertIn('没找到',plan['reply'])
 
+    def test_named_project_content_requires_source_not_world_knowledge(self):
+        for question in ('读取我three feet under中的故事背景大概讲了什么',
+                         '帮我调取 Three Feet Under 的故事背景',
+                         '看一下我three feet under中的故事背景'):
+            with self.subTest(question=question):
+                self.assertEqual(file_request(question, [])['reply'], ASK_PATH)
+
 if __name__=='__main__': unittest.main()

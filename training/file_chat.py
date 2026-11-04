@@ -7,8 +7,12 @@ ASK_PATH = '可以，把文件或文件夹的完整路径发给我，例如 D:\\
 def file_request(question, history):
     pending = bool(history and history[-1].get('role') == 'assistant' and
                    (history[-1].get('content') == ASK_PATH or history[-1].get('content','').startswith('我没找到这个文件或文件夹。')))
-    intent = bool(re.search(r'调取|读取|打开|查看|读一下|看一下|找一下|总结|分析', question) and
-                  re.search(r'文件|目录|项目|[\w-]+\.[a-zA-Z0-9]{1,8}\b|[A-Za-z]:[\\/]', question))
+    # Explicit read/retrieve requests also refer to named projects or their
+    # contents without using the literal word “file”. Ask for a path rather
+    # than sending such requests to knowledge search or unconstrained chat.
+    intent = bool(re.search(r'调取|读取|读一下', question) or
+                  (re.search(r'打开|查看|看一下|找一下|总结|分析', question) and
+                   re.search(r'文件|目录|项目|[\w-]+\.[a-zA-Z0-9]{1,8}\b|[A-Za-z]:[\\/]|我.{1,80}(?:中|里)的', question)))
     if not intent and not pending:
         return None
     # Quoting disambiguates file paths with spaces and trailing instructions.
