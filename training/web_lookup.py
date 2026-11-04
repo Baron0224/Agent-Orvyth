@@ -7,6 +7,9 @@ import urllib.request
 
 
 def should_search(text):
+    normalized = re.sub(r'[\s？?，,。.!！]', '', text)
+    if normalized in ('你是谁', '你是谁呀', '你是谁啊', '你是谁呢', '你到底是谁', '你是什么人', '介绍一下你自己', '你介绍一下自己'):
+        return False
     if len(text) > 120 or re.search(r'密码|密钥|身份证|银行卡|住址|手机号|验证码', text):
         return False
     if re.search(r'我(很|有点|觉得|感到|最近|今天|为什么|想|不想|累|难过|伤心|孤独)', text):

@@ -1,4 +1,4 @@
-"""Bounded local Pi SDK subprocess; uses only project read tools."""
+"""Bounded local Pi SDK subprocess with project reads and scoped Word copy editing."""
 import json
 from pathlib import Path
 import queue
