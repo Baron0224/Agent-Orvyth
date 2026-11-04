@@ -42,6 +42,8 @@ class Store:
                     done INTEGER NOT NULL DEFAULT 0, created REAL NOT NULL);
             """)
             columns = {row["name"] for row in db.execute("PRAGMA table_info(tasks)")}
+            if 'task_trace' not in {row['name'] for row in db.execute('PRAGMA table_info(messages)')}:
+                db.execute('ALTER TABLE messages ADD COLUMN task_trace TEXT')
             for name, kind in (("remind_time", "TEXT"), ("start_date", "TEXT"), ("end_date", "TEXT"), ("last_done_date", "TEXT"), ("due_at", "REAL")):
                 if name not in columns:
                     db.execute(f"ALTER TABLE tasks ADD COLUMN {name} {kind}")
@@ -116,7 +118,11 @@ class Store:
                     else:
                         item["remind_due"] = not item["done"] and not item["waiting"] and today >= item["start_date"] and now.strftime("%H:%M") >= item["remind_time"]
                 tasks.append(item)
-            messages = [dict(row) for row in db.execute("SELECT role,content FROM messages WHERE chat=? ORDER BY id", (profile["active_chat"],))]
+            messages = []
+            for row in db.execute("SELECT role,content,task_trace FROM messages WHERE chat=? ORDER BY id", (profile["active_chat"],)):
+                item={'role':row['role'],'content':row['content']}
+                if row['task_trace']: item['task_trace']=json.loads(row['task_trace'])
+                messages.append(item)
             return {"profile": json.loads(profile["profile"]), "chats": chats, "tasks": tasks,
                     "active_chat": profile["active_chat"], "messages": messages}
 
@@ -153,11 +159,13 @@ class Store:
             else:
                 raise ValueError("未知聊天操作。")
 
-    def save_pair(self, owner, chat, question, answer):
+    def save_pair(self, owner, chat, question, answer, task_trace=None):
         with self.connect() as db:
             row = self.require_chat(db, owner, chat)
             db.executemany("INSERT INTO messages(chat,role,content) VALUES (?,?,?)", [
                 (chat, "user", question), (chat, "assistant", answer)])
+            if task_trace:
+                db.execute('UPDATE messages SET task_trace=? WHERE id=last_insert_rowid()', (json.dumps(task_trace,ensure_ascii=False),))
             title = row["title"]
             if not row["manual_title"] and title == "新聊天":
                 title = re.sub(r"\s+", " ", question).strip()[:24]

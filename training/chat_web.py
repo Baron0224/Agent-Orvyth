@@ -19,6 +19,7 @@ from pi_bridge import available as pi_available, run_project, validate_request
 from file_chat import file_request
 from file_write import create_text_file
 from hermes_memory import HermesMemory
+from task_trace import TaskTrace
 
 ASSETS = Path(__file__).with_name("browser")
 
@@ -115,6 +116,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         assets = {"/particle-field.js": ("particle-field.js", "text/javascript"), "/assets/particle-ribbon.png": ("assets/particle-ribbon.png", "image/png"), "/": ("index.html", "text/html"), "/start": ("start.html", "text/html"), "/start.css": ("start.css", "text/css"), "/start.js": ("start.js", "text/javascript"), "/app.js": ("app.js", "text/javascript"), "/styles.css": ("styles.css", "text/css")}
         companion_files = {
+            "/task-progress.js": ASSETS / "task-progress.js",
             "/reminder-notifications.js": ASSETS / "reminder-notifications.js",
             "/pet3d.js": ASSETS / "pet3d.js",
             "/companion3d/model.js": ASSETS.parent / "companion-preview" / "dog" / "3d" / "model.js",
@@ -319,44 +321,57 @@ class Handler(BaseHTTPRequestHandler):
             self.json_response(409, {"error":"模型正在处理其他消息，请稍后再试。"})
             return
         stream = None
+        trace = None
         try:
             self.headers_for(200, "application/x-ndjson; charset=utf-8")
             self.end_headers()
             def emit(event):
                 self.wfile.write((json.dumps(event, ensure_ascii=False)+"\n").encode('utf-8'))
                 self.wfile.flush()
-            if 'reply' in plan or 'write' in plan or 'memory' in plan:
-                if 'memory' in plan:
-                    answer = self.server.memory.command(owner, plan['memory'])
-                else:
-                    answer = create_text_file(plan['write']) if 'write' in plan else plan['reply']
-                self.server.store.save_pair(owner, chat, question, answer)
+            if 'memory' in plan or 'reply' in plan:
+                answer=self.server.memory.command(owner,plan['memory']) if 'memory' in plan else plan['reply']
+                self.server.store.save_pair(owner,chat,question,answer)
                 emit({'type':'delta','content':answer})
             else:
-                answer = []
-                stream = run_project(plan['folder'],plan['task'],self.server.model,only_file=plan['only_file'])
-                for event in stream:
-                    if event['type']=='done':
-                        break
-                    if event['type']=='error':
-                        emit(event)
-                        return
-                    if event['type']=='delta': answer.append(event['content'])
-                    if event['type']=='status': event['message']='正在读取你指定的文件…'
-                    emit(event)
-                result=''.join(answer)
-                if not result:
-                    emit({'type':'error','message':'文件读取没有得到回答，请缩小要求后重试。'})
-                    return
-                self.server.store.save_pair(owner,chat,question,result)
+                trace=TaskTrace(emit)
+                if 'write' in plan:
+                    answer=create_text_file(plan['write'],on_step=trace.step)
+                else:
+                    trace.step('已定位来源',plan['folder'])
+                    chunks=[];settled=False;tools=0
+                    stream=run_project(plan['folder'],plan['task'],self.server.model,only_file=plan['only_file'])
+                    for event in stream:
+                        if event['type']=='error':raise RuntimeError(event['message'])
+                        if event['type']=='done':settled=True;break
+                        if event['type']=='delta':chunks.append(event['content'])
+                        if event['type']=='tool':
+                            trace.tool(event,plan['folder']);tools+=1
+                    if not settled or not tools or not ''.join(chunks).strip():
+                        raise RuntimeError('没有获得完整的工具执行结果，任务未确认完成。')
+                    answer=''.join(chunks)
+                    trace.step('工具执行已结束，回答依据已读取的资料生成')
+                trace.finish('completed','执行检查通过')
+                self.server.store.save_pair(owner,chat,question,answer,task_trace=trace.data)
+                emit({'type':'delta','content':answer})
             emit({'type':'done','chat_id':chat})
-        except (RuntimeError,OSError,sqlite3.Error) as error:
-            if not isinstance(error,(BrokenPipeError,ConnectionResetError,ConnectionAbortedError)):
-                try: emit({'type':'error','message':str(error)})
-                except OSError: pass
+        except (RuntimeError,OSError,ValueError,sqlite3.Error) as error:
+            if isinstance(error,(BrokenPipeError,ConnectionResetError,ConnectionAbortedError)):return
+            reason=str(error)
+            try:
+                if trace:
+                    trace.finish('failed',reason)
+                    answer='任务未完成：'+reason
+                    self.server.store.save_pair(owner,chat,question,answer,task_trace=trace.data)
+                    emit({'type':'delta','content':answer})
+                    emit({'type':'done','chat_id':chat})
+                else:emit({'type':'error','message':reason})
+            except (OSError,sqlite3.Error):pass
         finally:
-            if stream: stream.close()
-            self.server.generation_lock.release()
+            try:
+                if stream:stream.close()
+            finally:
+                self.server.generation_lock.release()
+
 
 def main():
     parser = argparse.ArgumentParser(description="Orvyth 本机浏览器聊天")
