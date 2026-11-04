@@ -156,6 +156,16 @@ class WebChatTest(unittest.TestCase):
         self.assertEqual(events[-1]['type'],'error')
         self.assertEqual(self.state()['messages'],[])
         self.assertFalse(self.server.generation_lock.locked())
+
+    def test_named_project_read_asks_for_path_without_search_or_model(self):
+        from file_chat import ASK_PATH
+        with patch('chat_web.lookup', side_effect=AssertionError('must not search')), \
+             patch('chat_web.LocalChat.reply', side_effect=AssertionError('must not invent an answer')):
+            status, _, events = self.send('读取我three feet under中的故事背景大概讲了什么')
+        self.assertEqual(status, 200)
+        self.assertEqual(events[0], {'type':'delta','content':ASK_PATH})
+        self.assertEqual(events[-1]['type'], 'done')
+        self.assertEqual(self.state()['messages'][-1]['content'], ASK_PATH)
     def test_archive_is_full_but_model_context_bounded(self):
         for i in range(10): self.send(str(i))
         self.assertEqual(len(self.state()['messages']),20)
