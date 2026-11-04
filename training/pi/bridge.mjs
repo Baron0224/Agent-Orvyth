@@ -10,13 +10,14 @@ try {
  const chunks=[]; for await (const chunk of process.stdin) chunks.push(chunk);
  const request=JSON.parse(Buffer.concat(chunks).toString('utf8'));
  const root=await realpath(request.folder);
- let calls=0;
+ let calls=0, successfulReads=0;
  const schema={type:'object',properties:{path:{type:'string',description:'项目内相对路径；列目录时可用 .'}},required:['path'],additionalProperties:false};
  const customTools=['list_project','read_project'].map(name=>({
   name,label:name==='list_project'?'查看目录':'读取文件',description:name==='list_project'?'列出项目内目录，最多80项。':'读取项目内UTF-8文本文件，最多12000字符。',parameters:schema,
   async execute(id,args){
    if(++calls>12) throw new Error('本次最多读取12次，请缩小任务范围。');
    const target=await projectPath(root,args.path); let text;
+   if(request.onlyFile && (name!=='read_project' || path.relative(root,target)!==request.onlyFile))throw new Error('本次只读取用户指定的文件。');
    if(name==='list_project'){
     const entries=await readdir(target,{withFileTypes:true});
     text=entries.filter(e=>!blocked(e.name)&&!e.isSymbolicLink()).slice(0,80).map(e=>e.name+(e.isDirectory()?'/':'')).join('\n');
@@ -25,6 +26,7 @@ try {
     const data=await readFile(target);if(data.includes(0))throw new Error('暂不读取二进制文件。');
     text=data.toString('utf8').slice(0,12000);
    }
+   successfulReads++;
    emit({type:'tool',name,path:args.path});
    return {content:[{type:'text',text}],details:{}};
   }
@@ -39,7 +41,7 @@ try {
  await session.prompt(request.task);
  const last=session.messages.filter(m=>m.role==='assistant').at(-1);
  if(last?.stopReason==='error'||last?.stopReason==='aborted')throw new Error(last.errorMessage||'模型未完成任务。');
- if(!calls)throw new Error('本地模型本次没有调用文件工具，以上文字未经过项目文件核实。请明确要求读取 README.md，或换用更擅长工具调用的模型。');
+ if(!successfulReads)throw new Error('本次没有成功读取文件，以上文字未经过文件核实。请检查路径和文件格式后重试。');
  emit({type:'done'});
 } catch(error){emit({type:'error',message:error.message});process.exitCode=1;}
 finally{session?.dispose();if(temp)await rm(temp,{recursive:true,force:true});}

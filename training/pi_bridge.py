@@ -23,7 +23,7 @@ def validate_request(payload):
         raise ValueError('请输入2000字以内的任务。')
     return str(folder), task.strip()
 
-def run_project(folder, task, model, timeout=180):
+def run_project(folder, task, model, timeout=180, only_file=None):
     if not available():
         raise RuntimeError('Pi 尚未安装，请在 training/pi 目录运行 npm ci --ignore-scripts。')
     process = subprocess.Popen([shutil.which('node'), str(BRIDGE)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -36,7 +36,7 @@ def run_project(folder, task, model, timeout=180):
         events.put(None)
     threading.Thread(target=read, daemon=True).start()
     try:
-        process.stdin.write(json.dumps({'folder':folder,'task':task,'model':model},ensure_ascii=False).encode('utf-8'))
+        process.stdin.write(json.dumps({'folder':folder,'task':task,'model':model,'onlyFile':only_file},ensure_ascii=False).encode('utf-8'))
         process.stdin.close()
         deadline=time.monotonic()+timeout
         while True:

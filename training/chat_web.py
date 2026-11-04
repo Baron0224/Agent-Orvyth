@@ -16,6 +16,7 @@ from browser_store import MissingRecord, Store
 from chat_local import DEFAULT_MODEL, LocalChat, SYSTEM_PROMPT
 from web_lookup import lookup, should_search
 from pi_bridge import available as pi_available, run_project, validate_request
+from file_chat import file_request
 
 ASSETS = Path(__file__).with_name("browser")
 
@@ -28,6 +29,7 @@ WEB_PRIVACY = (
     "浏览器版会将成功完成的聊天记录、待办任务、昵称、头像和偏好保存在这台电脑的 Orvyth 数据库中，"
     "关闭网页或重启服务后仍会保留。你可以在左侧删除聊天，在任务列表删除任务。"
     "回答时将问题和有限的本聊天上下文发给本机 Ollama；部分知识问题会自动发送给已配置的搜索服务，未配置时查询维基百科。头像和待办不会自动发送。"
+    "当你明确要求读取文件或文件夹时，会通过后台 Pi 将指定范围内的文本发送给本机 Ollama，成功的回答也会保存到本机聊天记录。"
     "这不是云同步，不同浏览器资料由本机 Cookie 区分；清除 Cookie 后会创建新的本机资料，旧数据库记录不会自动搬移。"
     "这不保证其他软件或操作系统没有日志。"
 )
@@ -109,7 +111,6 @@ class Handler(BaseHTTPRequestHandler):
             return
         assets = {"/particle-field.js": ("particle-field.js", "text/javascript"), "/assets/particle-ribbon.png": ("assets/particle-ribbon.png", "image/png"), "/": ("index.html", "text/html"), "/start": ("start.html", "text/html"), "/start.css": ("start.css", "text/css"), "/start.js": ("start.js", "text/javascript"), "/app.js": ("app.js", "text/javascript"), "/styles.css": ("styles.css", "text/css")}
         companion_files = {
-            "/pi-panel.js": ASSETS / "pi-panel.js",
             "/reminder-notifications.js": ASSETS / "reminder-notifications.js",
             "/pet3d.js": ASSETS / "pet3d.js",
             "/companion3d/model.js": ASSETS.parent / "companion-preview" / "dog" / "3d" / "model.js",
@@ -225,6 +226,10 @@ class Handler(BaseHTTPRequestHandler):
     def stream_reply(self, owner, chat, payload):
         question = Store.text(payload.get("message"), 2000, "消息")
         history = self.server.store.history(owner, chat)
+        file_plan = file_request(question, history)
+        if file_plan:
+            self.stream_file_chat(owner, chat, question, file_plan)
+            return
         today = datetime.now().astimezone()
         normalized = re.sub(r'[\s？?，,。.!！]', '', question)
         direct = None
@@ -299,6 +304,47 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
         finally:
+            self.server.generation_lock.release()
+
+    def stream_file_chat(self, owner, chat, question, plan):
+        if not self.server.generation_lock.acquire(blocking=False):
+            self.json_response(409, {"error":"模型正在处理其他消息，请稍后再试。"})
+            return
+        stream = None
+        try:
+            self.headers_for(200, "application/x-ndjson; charset=utf-8")
+            self.end_headers()
+            def emit(event):
+                self.wfile.write((json.dumps(event, ensure_ascii=False)+"\n").encode('utf-8'))
+                self.wfile.flush()
+            if 'reply' in plan:
+                answer = plan['reply']
+                self.server.store.save_pair(owner, chat, question, answer)
+                emit({'type':'delta','content':answer})
+            else:
+                answer = []
+                stream = run_project(plan['folder'],plan['task'],self.server.model,only_file=plan['only_file'])
+                for event in stream:
+                    if event['type']=='done':
+                        break
+                    if event['type']=='error':
+                        emit(event)
+                        return
+                    if event['type']=='delta': answer.append(event['content'])
+                    if event['type']=='status': event['message']='正在读取你指定的文件…'
+                    emit(event)
+                result=''.join(answer)
+                if not result:
+                    emit({'type':'error','message':'文件读取没有得到回答，请缩小要求后重试。'})
+                    return
+                self.server.store.save_pair(owner,chat,question,result)
+            emit({'type':'done','chat_id':chat})
+        except (RuntimeError,OSError,sqlite3.Error) as error:
+            if not isinstance(error,(BrokenPipeError,ConnectionResetError,ConnectionAbortedError)):
+                try: emit({'type':'error','message':str(error)})
+                except OSError: pass
+        finally:
+            if stream: stream.close()
             self.server.generation_lock.release()
 
 def main():
