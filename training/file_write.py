@@ -46,14 +46,19 @@ def write_request(question):
         return {'reply':'请提供1到12000字的文本内容。'}
     return {'write':{'name':name,'content':content}}
 
-def create_text_file(request):
+def create_text_file(request, on_step=None):
     folder=desktop_folder()
     name=clean_name(request['name'])
     target=folder/name
+    if on_step: on_step('准备创建文本文件',str(target))
     try:
         # Exclusive creation also prevents following an existing same-name link.
         with target.open('x',encoding='utf-8') as file:
             file.write(request['content'])
     except FileExistsError:
+        if on_step: raise FileExistsError(f'桌面已有“{name}”，没有覆盖。请换一个文件名。')
         return f'桌面已经有“{name}”，我没有覆盖它。请换一个文件名再创建。'
+    if target.read_text(encoding='utf-8') != request['content']:
+        raise OSError('文件已写入，但重新读取的内容不一致，请检查文件。')
+    if on_step: on_step('已重新读取核对，内容一致',str(target))
     return f'已经在桌面创建“{name}”。\n保存位置：{target}\n内容：\n{request["content"]}'

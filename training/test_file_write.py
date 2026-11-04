@@ -46,10 +46,13 @@ class FileWriteTests(unittest.TestCase):
                     with opener.open(request) as response:
                         events=[json.loads(line) for line in response]
                 self.assertEqual(events[-1]['type'],'done')
-                self.assertIn('已经在桌面创建',events[0]['content'])
+                answer=next(e['content'] for e in events if e['type']=='delta')
+                self.assertIn('已经在桌面创建',answer)
                 self.assertEqual((desktop/'你好的文档.txt').read_text(encoding='utf-8'),'我爱你')
                 with opener.open(urllib.request.Request(server.origin+'/api/session',headers={'Cookie':cookie})) as response:
-                    self.assertEqual(json.load(response)['messages'][-1]['content'],events[0]['content'])
+                    saved=json.load(response)['messages'][-1]
+                    self.assertEqual(saved['content'],answer)
+                    self.assertEqual(saved['task_trace']['state'],'completed')
             finally:
                 server.shutdown();server.server_close();worker.join()
 

@@ -190,7 +190,7 @@ function applyState(data, full = false) {
   renderProfile(); renderHistory(); renderTasks();
   if (full) {
     messages.replaceChildren(); $('#welcome').hidden = false;
-    for (const message of data.messages) addMessage(message.role, message.content);
+    for (const message of data.messages) { const item=addMessage(message.role, message.content); if(message.task_trace) window.OrvythTaskProgress.render(item.entry,message.task_trace); }
     follow(true);
   }
   controls();
@@ -236,7 +236,7 @@ async function submit(text) {
   const conversation = activeChat;
   addMessage('user', text); const answer = addMessage('assistant', '正在想怎么回答…', false);
   answer.entry.classList.add('pending'); follow(true); setPet('thinking', '这句话我听见了，正在认真想。');
-  let output = '', done = false;
+  let output = '', done = false, taskActive = false;
   try {
     const response = await fetch('/api/chat', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,chat_id:conversation})});
     if (!response.ok) { const data = await response.json(); throw new Error(data.error || '暂时无法回答，请重试。'); }
@@ -244,6 +244,7 @@ async function submit(text) {
     const consume = line => {
       if (!line.trim()) return; const event = JSON.parse(line);
       if (event.type === 'error') throw new Error(event.message);
+      if (event.type === 'task') { taskActive=event.task.state==='running'; window.OrvythTaskProgress.render(answer.entry,event.task); }
       if (event.type === 'done') done = true;
       if (event.type === 'status' && !output) answer.body.textContent = event.message;
       if (event.type === 'tool' && !output) answer.body.textContent = (event.name === 'list_project' ? '正在查看目录：' : '正在读取：') + event.path;
@@ -266,6 +267,7 @@ async function submit(text) {
     try { applyState(await requestJSON('/api/session')); } catch { setNotice('回答已收到，列表暂时未刷新。'); }
     input.focus(); setPet('idle', '我听着呢，想继续说就接着说。');
   } catch (error) {
+    if(taskActive) window.OrvythTaskProgress.render(answer.entry,{state:'failed',steps:[{label:'连接中断，任务结果尚未确认。请检查文件后再重试。'}]});
     answer.entry.classList.remove('pending'); answer.entry.classList.add('failed'); answer.body.textContent = output || '这次没能收到回答。';
     setNotice(error.message || '服务暂时无法连接，请重试。'); input.value = text; setPet('idle', '这次连接没跟上，我们可以再试一次。');
   } finally { busy = false; resize(); }
