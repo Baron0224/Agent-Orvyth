@@ -1,0 +1,14 @@
+{
+  "store.py": {
+    "source": "https://github.com/NousResearch/hermes-agent/blob/main/tools/memory_tool_store.py",
+    "upstream_sha256": "0f665c95fcf44e3115c7a625622885e20254418b414a92a1f8570d1300e9fc31"
+  },
+  "threat_patterns.py": {
+    "source": "https://github.com/NousResearch/hermes-agent/blob/main/tools/threat_patterns.py",
+    "upstream_sha256": "9e93a48960d55b7403c04bb30ca24ea178ba60dfc79e1a3938ce4e19a792fa02"
+  },
+  "LICENSE": {
+    "source": "https://github.com/NousResearch/hermes-agent/blob/main/LICENSE",
+    "upstream_sha256": "821556e6336796450ab852d375117b48a4887e71d255794fd6318d99982a5ab6"
+  }
+}
