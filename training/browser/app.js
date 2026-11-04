@@ -245,6 +245,8 @@ async function submit(text) {
       if (!line.trim()) return; const event = JSON.parse(line);
       if (event.type === 'error') throw new Error(event.message);
       if (event.type === 'done') done = true;
+      if (event.type === 'status' && !output) answer.body.textContent = event.message;
+      if (event.type === 'tool' && !output) answer.body.textContent = (event.name === 'list_project' ? '正在查看目录：' : '正在读取：') + event.path;
       if (event.type === 'delta') {
         if (!output) setPet('speaking', '想好一点，就先说给你听。');
         const nearBottom = area.scrollHeight - area.scrollTop - area.clientHeight < 180;
