@@ -24,6 +24,8 @@ def search_roots():
     home = Path.home()
     project = Path(__file__).resolve().parents[1]
     candidates = [home/'Documents', home/'Desktop', home/'桌面', project, project.parent]
+    if os.name == 'nt':
+        candidates.extend(Path(f'{drive}:/')/name for drive in 'CDEF' for name in ('codex','Projects'))
     for cloud in (home/'OneDrive',):
         candidates.extend(cloud/name for name in ('Documents','文档','เอกสาร','Desktop','桌面'))
     return [p for p in candidates if p.is_dir()]
