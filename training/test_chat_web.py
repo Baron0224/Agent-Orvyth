@@ -160,6 +160,7 @@ class WebChatTest(unittest.TestCase):
     def test_named_project_read_asks_for_path_without_search_or_model(self):
         from file_chat import ASK_PATH
         with patch('chat_web.lookup', side_effect=AssertionError('must not search')), \
+             patch('file_chat.find_matches',return_value=[]), \
              patch('chat_web.LocalChat.reply', side_effect=AssertionError('must not invent an answer')):
             status, _, events = self.send('读取我three feet under中的故事背景大概讲了什么')
         self.assertEqual(status, 200)

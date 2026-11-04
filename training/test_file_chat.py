@@ -1,9 +1,14 @@
 import tempfile
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 from file_chat import ASK_PATH, file_request
 
 class FileChatTests(unittest.TestCase):
+    def setUp(self):
+        patcher=patch('file_chat.find_matches',return_value=[])
+        self.lookup=patcher.start();self.addCleanup(patcher.stop)
+
     def test_normal_chat_does_not_call_pi(self):
         self.assertIsNone(file_request('今天有点累', []))
         self.assertIsNone(file_request('Python文件是什么？', []))
@@ -33,5 +38,25 @@ class FileChatTests(unittest.TestCase):
                          '看一下我three feet under中的故事背景'):
             with self.subTest(question=question):
                 self.assertEqual(file_request(question, [])['reply'], ASK_PATH)
+
+    def test_unique_named_project_is_opened_without_asking_for_path(self):
+        with tempfile.TemporaryDirectory() as base:
+            project=Path(base)/'Three Feet Under';project.mkdir()
+            self.lookup.return_value=[project]
+            plan=file_request('读取我文档里three feet under中的故事背景大概讲了什么',[])
+            self.assertEqual(plan['folder'],str(project.resolve()))
+            self.assertIn('故事背景',plan['task'])
+            self.lookup.assert_called_with('three feet under')
+
+    def test_ambiguous_candidates_can_be_chosen_by_number(self):
+        with tempfile.TemporaryDirectory() as base:
+            a=Path(base)/'draft';b=Path(base)/'final';a.mkdir();b.mkdir()
+            self.lookup.return_value=[a,b]
+            question='读取three feet under故事背景'
+            reply=file_request(question,[])['reply']
+            history=[{'role':'user','content':question},{'role':'assistant','content':reply}]
+            plan=file_request('第二个',history)
+            self.assertEqual(plan['folder'],str(b.resolve()))
+            self.assertIn('故事背景',plan['task'])
 
 if __name__=='__main__': unittest.main()
