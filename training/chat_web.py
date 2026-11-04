@@ -15,6 +15,7 @@ import webbrowser
 from browser_store import MissingRecord, Store
 from chat_local import DEFAULT_MODEL, LocalChat, SYSTEM_PROMPT
 from web_lookup import lookup, should_search
+from pi_bridge import available as pi_available, run_project, validate_request
 
 ASSETS = Path(__file__).with_name("browser")
 
@@ -93,6 +94,9 @@ class Handler(BaseHTTPRequestHandler):
             token, owner = self.owner(create=True)
             self.json_response(200, self.server.state(owner), token)
             return
+        if self.path == "/api/pi/status":
+            self.json_response(200, {"installed": pi_available(), "model": self.server.model})
+            return
         if self.path == "/api/status":
             try:
                 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -105,6 +109,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         assets = {"/particle-field.js": ("particle-field.js", "text/javascript"), "/assets/particle-ribbon.png": ("assets/particle-ribbon.png", "image/png"), "/": ("index.html", "text/html"), "/start": ("start.html", "text/html"), "/start.css": ("start.css", "text/css"), "/start.js": ("start.js", "text/javascript"), "/app.js": ("app.js", "text/javascript"), "/styles.css": ("styles.css", "text/css")}
         companion_files = {
+            "/pi-panel.js": ASSETS / "pi-panel.js",
             "/reminder-notifications.js": ASSETS / "reminder-notifications.js",
             "/pet3d.js": ASSETS / "pet3d.js",
             "/companion3d/model.js": ASSETS.parent / "companion-preview" / "dog" / "3d" / "model.js",
@@ -133,7 +138,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("Origin") != self.server.origin:
             self.json_response(403, {"error": "仅接受本机聊天页面发出的请求。"})
             return
-        routes = {"/api/chat", "/api/clear", "/api/profile", "/api/chats/new", "/api/chats/open", "/api/chats/rename", "/api/chats/delete", "/api/tasks/add", "/api/tasks/toggle", "/api/tasks/delete"}
+        routes = {"/api/pi/run", "/api/chat", "/api/clear", "/api/profile", "/api/chats/new", "/api/chats/open", "/api/chats/rename", "/api/chats/delete", "/api/tasks/add", "/api/tasks/toggle", "/api/tasks/delete"}
         if self.path not in routes:
             self.json_response(404, {"error": "接口不存在。"})
             return
@@ -156,6 +161,13 @@ class Handler(BaseHTTPRequestHandler):
             self.json_response(410, {"error": "本机资料尚未载入，请刷新页面。"})
             return
         try:
+            if self.path == "/api/pi/run":
+                try:
+                    folder, task = validate_request(payload)
+                except OSError:
+                    raise ValueError("无法打开项目文件夹，请检查路径。")
+                self.stream_project(folder, task)
+                return
             if self.path == "/api/profile":
                 self.server.store.save_profile(owner, payload)
             elif self.path.startswith("/api/tasks/"):
@@ -187,6 +199,29 @@ class Handler(BaseHTTPRequestHandler):
             self.json_response(400, {"error": str(error)})
         except sqlite3.Error:
             self.json_response(503, {"error": "本机数据暂时无法读写，请稍后重试。"})
+    def stream_project(self, folder, task):
+        if not self.server.generation_lock.acquire(blocking=False):
+            self.json_response(409, {"error": "模型正在处理其他消息，请稍后再试。"})
+            return
+        stream = run_project(folder, task, self.server.model)
+        try:
+            self.headers_for(200, "application/x-ndjson; charset=utf-8")
+            self.end_headers()
+            try:
+                for event in stream:
+                    self.wfile.write((json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8"))
+                    self.wfile.flush()
+            except (RuntimeError, OSError) as error:
+                if isinstance(error, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+                    return
+                self.wfile.write((json.dumps({"type":"error", "message":str(error)}, ensure_ascii=False) + "\n").encode("utf-8"))
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
+        finally:
+            stream.close()
+            self.server.generation_lock.release()
+
     def stream_reply(self, owner, chat, payload):
         question = Store.text(payload.get("message"), 2000, "消息")
         history = self.server.store.history(owner, chat)
