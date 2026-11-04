@@ -17,6 +17,7 @@ from chat_local import DEFAULT_MODEL, LocalChat, SYSTEM_PROMPT
 from web_lookup import lookup, should_search
 from pi_bridge import available as pi_available, run_project, validate_request
 from file_chat import file_request
+from file_write import create_text_file
 
 ASSETS = Path(__file__).with_name("browser")
 
@@ -317,8 +318,8 @@ class Handler(BaseHTTPRequestHandler):
             def emit(event):
                 self.wfile.write((json.dumps(event, ensure_ascii=False)+"\n").encode('utf-8'))
                 self.wfile.flush()
-            if 'reply' in plan:
-                answer = plan['reply']
+            if 'reply' in plan or 'write' in plan:
+                answer = create_text_file(plan['write']) if 'write' in plan else plan['reply']
                 self.server.store.save_pair(owner, chat, question, answer)
                 emit({'type':'delta','content':answer})
             else:
