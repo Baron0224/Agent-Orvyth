@@ -4,12 +4,12 @@
 
 浏览器版已支持将聊天、任务和资料保存到本机数据库；本页介绍的终端入口仍只在运行期间保留上下文，两者保存方式不同。
 
-这个入口使用本机 Ollama 和现成的 Qwen3 4B 指令模型生成回答，可回答语料文件中没有的问题。它与 `train_nn.py`、`train_qa.py` 的从零训练实验是两个入口。当前未接入网页搜索，也未发布网站或打包桌面安装程序。
+这个入口默认使用本机 Ollama 和现成的 `deepseek-r1:7b` 推理模型生成回答，可回答语料文件中没有的问题。它与 `train_nn.py`、`train_qa.py` 的从零训练实验是两个入口。当前终端聊天未接入网页搜索，也未发布网站或打包桌面安装程序。
 
 ## 第一次准备
 
 1. 安装 [Ollama Windows 版](https://ollama.com/download/windows)。
-2. 在 PowerShell 运行 `ollama pull qwen3:4b-instruct`，下载约 2.5GB 的本地模型。模型文件不要提交进 Git。模型是 Apache 2.0 许可，详见[模型页面](https://ollama.com/library/qwen3:4b-instruct)。
+2. 在 PowerShell 运行 `ollama pull deepseek-r1:7b`，下载约 4.7GB 的本地模型。模型文件不要提交进 Git，许可详见[模型页面](https://ollama.com/library/deepseek-r1:7b)。本机已经安装，无需重复下载。
 3. 确认 Ollama 已启动，双击本目录的 `chat_local.cmd` 开始聊天。
 
 本机已选择把模型存放到 `D:\OpenAgentModels\ollama`，通过用户环境变量 `OLLAMA_MODELS` 配置。Ollama 云端功能由 `OLLAMA_NO_CLOUD=1` 关闭。模型下载和软件更新需要网络；本地推理调用的是 `127.0.0.1:11434`，不需要第三方云端模型密钥。
@@ -17,7 +17,7 @@
 ## PowerShell 启动命令
 
 ```powershell
-& "D:\GitHub work\OpenAgent\OpenAgent\training\.venv\Scripts\python.exe" -X utf8 "D:\GitHub work\OpenAgent\OpenAgent\training\chat_local.py"
+& "D:\Codex\Orvyth\training\.venv\Scripts\python.exe" -X utf8 "D:\Codex\Orvyth\training\chat_local.py"
 ```
 
 输入 `exit` 退出，`/clear` 清空当前对话，`/privacy` 查看本聊天脚本的数据处理说明。常见的直接询问聊天记录的问题也会返回程序固定说明，不依赖模型猜测。对话历史只留在当前程序内存里，退出后不由脚本保存；这不代表其他软件或操作系统没有日志。程序限制历史长度以控制资源占用，较早的内容会被移出上下文。首次回答需要加载模型，通常会比后续回答慢。输出可能出错，不代表事实已核实。
@@ -27,5 +27,7 @@
 如果提示无法连接，先从开始菜单打开 Ollama。如果提示缺少模型，运行上面的 `ollama pull` 命令。用 `ollama ps` 可以查看模型是否运行在 GPU 上。
 
 ## 后续两种交付方式
+
+模型切换可在启动命令末尾加 `--model qwen3:8b` 或 `--model qwen3:4b-instruct`，无需重新训练。R1使用Ollama原生思考字段，程序只取最终正文；旧式think标签会完整接收后过滤，达到生成上限或没有最终回答时不保存成功历史。相关协议见 [Ollama思考能力文档](https://docs.ollama.com/capabilities/thinking)。这不会把R1与Qwen权重合并。
 
 先用这套本地生成能力验证聊天体验。最终桌面客户端和网站版可连接统一部署的模型服务，让用户不必自行安装 Ollama；当前仅在开发电脑上验证，尚未部署云端。服务器上的模型不能直接公开裸接口，网站需要独立实现访问控制和资源限制；当前服务仅供本机使用。
