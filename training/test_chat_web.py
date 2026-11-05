@@ -1,6 +1,7 @@
 """本机持久记录、会话隔离、聊天与任务接口、流式失败的回归验证。"""
 import base64
 import http.client
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -53,6 +54,31 @@ class WebChatTest(unittest.TestCase):
         with patch('chat_web.LocalChat.reply',fake_reply):
             return self.request('POST','/api/chat',{'chat_id':chat or self.chat,'message':message})
     def state(self): return self.request('GET','/api/session')[2]
+    def test_pi_run_uses_configured_tool_model_and_validates_input(self):
+        def results():
+            yield {'type': 'delta', 'content': '测试文件结果'}
+            yield {'type': 'done'}
+        folder = str(Path(self.directory.name).resolve())
+        for tool_model in ('qwen3:8b', 'qwen3:4b-instruct'):
+            self.server.model = 'deepseek-r1:7b'
+            self.server.tool_model = tool_model
+            self.assertEqual(self.request('GET', '/api/pi/status')[2]['model'], tool_model)
+            with patch('chat_web.run_project', return_value=results()) as run:
+                status, _, events = self.request('POST', '/api/pi/run', {
+                    'folder': folder, 'task': '  读取测试文件  ', 'model': 'deepseek-r1:7b',
+                })
+            self.assertEqual(status, 200)
+            self.assertEqual(events[-1]['type'], 'done')
+            run.assert_called_once_with(folder, '读取测试文件', tool_model)
+        for payload in (
+            {'folder': [], 'task': '读取文件'},
+            {'folder': folder, 'task': None},
+            {'folder': folder, 'task': ' '},
+            {'folder': folder, 'task': '字' * 2001},
+        ):
+            with patch('chat_web.run_project') as run:
+                self.assertEqual(self.request('POST', '/api/pi/run', payload)[0], 400)
+                run.assert_not_called()
     def test_lookup_does_not_append_citation_footer(self):
         source = {'title': '测试百科', 'url': 'https://example.org/source', 'extract': '供测试的事实。'}
         with patch('chat_web.lookup', return_value=source):
@@ -69,7 +95,7 @@ class WebChatTest(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertIn(name, events[0]['content'])
             self.assertIn('Orvyth', events[0]['content'])
-            self.assertIn('私人秘书', events[0]['content'])
+            self.assertIn('AI', events[0]['content'])
             _, _, repeated = self.send('你知道你叫什么名字吗')
             self.assertNotEqual(events[0]['content'], repeated[0]['content'])
             self.assertIn(name, repeated[0]['content'])
@@ -79,6 +105,14 @@ class WebChatTest(unittest.TestCase):
                 status, _, events = self.send(question)
                 self.assertEqual(status, 200)
                 self.assertNotIn('资料来源', events[0]['content'])
+    def test_model_identity_keeps_custom_name_without_search_or_generation(self):
+        profile = self.state()['profile']
+        self.request('POST', '/api/profile', {**profile, 'pet_name': '小团'})
+        with patch('chat_web.lookup', side_effect=AssertionError('must not search')), patch('chat_web.LocalChat.reply', side_effect=AssertionError('runtime fact must not be guessed')):
+            _, _, events = self.request('POST', '/api/chat', {'chat_id': self.chat, 'message': '你现在用什么模型'})
+        self.assertIn('小团', events[0]['content'])
+        self.assertIn('Orvyth', events[0]['content'])
+        self.assertIn('deepseek-r1:7b', events[0]['content'])
     def test_assets_host_origin_and_input_boundaries(self):
         self.assertEqual(self.request('GET','/')[0],200)
         for asset in ('/reminder-notifications.js', '/pet3d.js', '/companion3d/model.js', '/companion3d/vendor/three.module.js', '/companion3d/vendor/three.core.js'):
@@ -177,6 +211,20 @@ class WebChatTest(unittest.TestCase):
         with self.server.generation_lock:
             self.assertEqual(self.request('POST','/api/chat',{'chat_id':self.chat,'message':'hi'})[0],503)
             self.assertEqual(self.request('POST','/api/tasks/add',{'title':'仍能记任务'})[0],200)
+
+    def test_news_uses_retrieved_source_without_api_key(self):
+        source={'title':'BBC World','url':'https://feeds.bbci.co.uk/news/world/rss.xml','extract':'真实新闻标题及时间','kind':'news'}
+        with patch.dict('os.environ',{'TAVILY_API_KEY':''}),patch('chat_web.lookup',return_value=source) as lookup:
+            status,_,events=self.send('说出2026.11.4的新闻')
+        self.assertEqual(status,200);lookup.assert_called_once()
+        self.assertEqual(events[0]['content'],'测试回答')
+
+    def test_repeated_login_request_asks_for_missing_evidence(self):
+        question='我现在不想休息，想解决登录报错，先检查什么'
+        first=self.send(question)[2][0]['content']
+        second=self.send(question)[2][0]['content']
+        self.assertIn('错误原文',first);self.assertIn('还缺',second)
+        self.assertNotEqual(first,second)
     def test_failed_stream_not_saved(self):
         _,_,events=self.send('模拟失败')
         self.assertEqual(events[-1]['type'],'error')
@@ -198,6 +246,25 @@ class WebChatTest(unittest.TestCase):
         self.assertEqual(len(self.state()['messages']),20)
         _,owner=self.server.store.owner(self.cookie.split('=',1)[1])
         self.assertEqual(len(self.server.store.history(owner,self.chat)),16)
+    def test_r1_http_saves_only_final_answer_and_no_failed_pair(self):
+        chunks = [
+            {'message': {'thinking': 'internal reasoning'}},
+            {'message': {'content': '<thi'}},
+            {'message': {'content': 'nk>legacy reasoning</think>391'}, 'done': True},
+        ]
+        raw = b''.join(json.dumps(chunk).encode() + b'\n' for chunk in chunks)
+        self.server.model = 'deepseek-r1:7b'
+        with patch('chat_local.urllib.request.build_opener') as build:
+            build.return_value.open.return_value = io.BytesIO(raw)
+            status, _, events = self.request('POST', '/api/chat', {'chat_id': self.chat, 'message': '计算17乘23'})
+        self.assertEqual(status, 200)
+        self.assertEqual(events, [{'type': 'delta', 'content': '391'}, {'type': 'done', 'chat_id': self.chat}])
+        self.assertEqual(self.state()['messages'][-1]['content'], '391')
+        with patch('chat_local.urllib.request.build_opener') as build:
+            build.return_value.open.return_value = io.BytesIO(b'{"message":{"thinking":"unfinished"},"done":true,"done_reason":"length"}\n')
+            _, _, events = self.request('POST', '/api/chat', {'chat_id': self.chat, 'message': '计算18乘23'})
+        self.assertEqual(events[-1]['type'], 'error')
+        self.assertEqual(len(self.state()['messages']), 2)
     def test_web_privacy_is_persistent_and_cli_is_still_temporary(self):
         with patch('chat_local.urllib.request.build_opener',side_effect=AssertionError('should not call model')):
             web=LocalChat(system_prompt=WEB_PROMPT,privacy_notice=WEB_PRIVACY)

@@ -3,6 +3,7 @@ from pathlib import Path
 import re
 from file_lookup import find_matches, query_name
 from file_write import write_request
+from word_write import word_request
 
 ASK_PATH = '我在本机常用文档和项目目录里暂时没定位到对应文件。告诉我更具体的文件名，或者把文件所在文件夹发给我，我再接着找。'
 
@@ -19,6 +20,8 @@ def natural_location(question):
     return match[1].upper()+':\\'+rest if rest else None
 
 def file_request(question, history):
+    word = word_request(question)
+    if word: return word
     creation=write_request(question)
     if creation: return creation
     original_question = question

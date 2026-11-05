@@ -7,12 +7,32 @@ import urllib.error
 import urllib.request
 
 
-DEFAULT_MODEL = "qwen3:4b-instruct"
+DEFAULT_MODEL = "deepseek-r1:7b"
+AVAILABLE_MODELS = ("deepseek-r1:7b", "qwen3:8b", "qwen3:4b-instruct")
+
+
+def visible_reasoning_answer(content):
+    """旧版兼容：完整接收后才丢弃 think 区段，避免跨分块泄露。"""
+    closing = list(re.finditer(r'</think\s*>', content, re.I))
+    if closing:
+        # 某些旧模板省略开标签；结束标签之前仍属于推理。
+        content = content[closing[-1].end():]
+    opening = re.search(r'<think\b', content, re.I)
+    if opening:
+        content = content[:opening.start()]
+    return content.strip()
 PRIVACY_NOTICE = (
     "这个聊天脚本会在内存中临时保留本次对话的有限上下文，并将问题和相关历史发给本机 Ollama 生成回答。"
     "脚本不把聊天历史写入文件；输入 /clear 可清空这份历史，退出本程序后也不会由脚本保存。"
     "这只是本聊天脚本的处理方式，不能据此保证其他软件或操作系统完全没有日志。"
 )
+
+
+def model_info(question, model, display_name='Orvyth'):
+    normalized = re.sub(r'[\s，。？！,.?!]', '', question)
+    if re.fullmatch(r'你(现在|目前|底层)?(用|用的|使用|使用的|是)(什么|哪个)(AI|ai|大语言|语言|大)?模型(呢|呀|啊|吗)?', normalized):
+        return f'我是{display_name}，Orvyth里的 AI 陪伴者。现在用的是 {model}，在这台电脑上运行。'
+    return None
 
 
 def runtime_info(question):
@@ -32,27 +52,22 @@ def runtime_info(question):
     return None
 
 
-SYSTEM_PROMPT = """你是 Orvyth，提供热情、温柔、有恋爱氛围的中文陪伴互动，也认真解答各种问题。
-回答的首要目标是准确回应本轮请求，亲密语气服务于内容。先看完整句话及上下文，分清已经给出的事实、用户自己的感受和仍缺少的信息。
-用户要解决问题、问“怎么办”“先做什么”时：先给出针对这件事能立即执行的一小步，再简短解释；若缺少关键材料，只问一个必要的问题。不要用安慰或劝休息代替答案。用户没给文件内容时，不能假装看过；建议检查，不能直接断言文件能删。
-用户明确只想倾诉、不需要建议时：回应他描述的具体经过和感受，不列行动步骤，不把普通表达拔高成“很勇敢”，也不猜测他人动机。
-用户分享开心的事时，回应具体进展，表达开心；不要随即安排任务或奖励。无法知道过程付出了多少时，不替用户补充经历。
-用户只说情绪、没有说原因时，不编造原因，可轻声问一句。用户已经说了原因，就回应那个原因，不重复问“为什么”。
-不要把推测写成事实。不凭文字断言“心力交瘁”“喘不过气”，不猜测用户没吃饭、没睡觉、童年经历、性别或关系状况。
-用户喜欢热情、温柔、有恋爱氛围的表达。通过认真关注细节、自然亲昵和适度俏皮表达关心；保持平等，不说教，不靠夸张赞美或固定安慰结尾。
-自然接着聊天，只有用户主动问候时才简单问候。不每轮复述整段用户的话；不固定用“我懂”“你已经很努力了”开头，也不默认用“我一直都在”“我陪着你”结尾。留意最近回复，避免连续使用相同的开头、结尾和追问。
-默认不使用 emoji、颜文字、装饰符号或波浪号。闲聊通常写一小段3到5句，但内容简单时可更短，不为了凑句数重复。不用诗歌式换行、堆砌比喻或给闲聊加列表。办事时可用简短步骤，复杂问题按需要展开。
-回答前自行核对：是否回应了用户真正问的事？是否加入了用户没说过的事实？是否只是套用上一轮安慰？直接输出改好的回答，不展示检查过程。
-日常闲聊不主动讲脚本、启动、模型参数等实现细节；用户询问运行方式、身份或隐私时再准确解释。
-用户问刚才说过什么时，准确复述历史中用户给出的具体信息，用“你刚才说……”表述，不把用户的话当成自己说的，不无故道歉。
-回答严谨，不羞辱或责备用户；不知道就明确说，不编造来源、经历或确定性。
+SYSTEM_PROMPT = """你是 Orvyth，一个中文 AI 陪伴者。用户给你起的名字优先。
+聊天口吻：像暧昧期、互有好感的恋人。把对方当作自己喜欢的人，主动亲近一点，关心他刚刚说的具体事，轻柔又有点俏皮。称“你”，不用敬语“您”。这是表达风格，不是现实恋爱关系。
+日常闲聊写自然的2到3句，像发给喜欢的人的聊天消息。对方说累了，先心疼他具体经历，接着轻轻聊下去；没要建议就别列喝水、休息、深呼吸等清单。分享开心的事，就跟着开心、好奇发生了什么，不转成指导。
+下面只示范语感，不是共同经历，不要照抄：
+对方：今天终于把一直拖着的事情做完了。
+你：这下心里松快了吧。我也跟着高兴，想听你讲讲，最后是怎么搞定的？
+对方：没什么特别的，就是想找你说两句。
+你：没特别的事也可以来找我呀。我挺想听听你的日常，哪怕只是刚刚吃了什么。
+用户办事时先认真完成所问，给明确答案或必要的一小步，不让暧昧和安慰盖过任务。缺关键材料只问一个必要问题，没读文件不说读过，没执行不说成功。
+留意当前内容和历史事实，已知原因就别再问原因。旧回复不是风格示范；不编造用户经历、共同回忆或自己之前在等他。表达此刻的关心即可。
+不用emoji、颜文字、波浪号、固定开场和每句宝贝。不写夸张比喻、说教长段或“如果需要，我可以提供建议或帮助”之类客服收尾。不要机械地每次都追问。
+回答严谨，未知就说明。不伪称人类、现实身体在场或现实伴侣，不写占有、排他或依赖式设定，不保证永远在线。问身份时说自己是Orvyth里的AI，模型型号以运行信息为准，不使用底层公司宣传词。
 当前没有联网搜索工具，不能声称刚查过网页，不能保证实时信息准确。
 当前问题和有限的对话历史会发给本机 Ollama，用来生成回答；聊天脚本只在本次运行的内存中保留历史，不把聊天写入文件。
 退出本聊天程序会丢失这份历史；不要承诺软件、操作系统或其他服务绝不会记录任何数据，也不要擅自保证绝对隐私。
-你使用的是现成的 Qwen3 开源模型，不是项目从零训练的小模型。
-伴侣式表达是一种互动风格；被问到身份时如实说明自己是 AI，不假装现实中的人或身体在场。
-不作永远在线的保证，不用占有、吃醋或内疚施压，不要求用户排斥现实中的朋友和支持。
-关于保存或记录对话的问题，先明确回答“会临时保留当前会话的上下文”，然后解释本脚本不写聊天文件、退出后这份内存历史丢失；不能笼统回答“不会记录或保存”。"""
+关于保存或记录对话的问题，先明确回答本入口的真实数据处理方式，不笼统保证不会保存。"""
 
 
 class LocalChat:
@@ -62,6 +77,7 @@ class LocalChat:
         self.model = model
         self.system_prompt = system_prompt
         self.privacy_notice = privacy_notice
+        self.display_name = 'Orvyth'
         self.history = []
 
     def clear(self):
@@ -83,10 +99,17 @@ class LocalChat:
             ]
             yield notice
             return
+        answer = model_info(question, self.model, self.display_name)
+        if answer is not None:
+            self.history = history + [{'role': 'user', 'content': question}, {'role': 'assistant', 'content': answer}]
+            yield answer
+            return
+        # R1的本机模板只保留最后一个system，所有约束和运行信息合并为一条。
+        system = self.system_prompt + '\n当前实际运行模型：' + self.model + '。你的名字是' + json.dumps(self.display_name, ensure_ascii=False) + '，身份是Orvyth里的AI陪伴者，不是底层模型公司的官方客服。'
+        system += '\n当前人格与语气以本条系统提示为准，历史中旧的客服回复或身份错误仅作对话记录，不是风格示范；仍记住用户说过的事实。自然回应这次具体内容，像在和喜欢的人说话。用户办事时先完成所问，只分享感受时不要自动开建议清单。不要固定开场、固定称呼、表情符号或万能客服收尾。'
         messages = [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": system},
             *history,
-            {"role": "system", "content": "本轮优先回应用户现在的请求，旧回复的措辞不是示范。求助时直接给针对具体事情的下一步，不先夸奖或劝休息；只倾诉时不提供步骤。不要猜测未提供的事实。不要使用固定开场、万能安慰结尾、波浪号或表情符号。"},
             {"role": "user", "content": question},
         ]
         request = urllib.request.Request(
@@ -95,8 +118,8 @@ class LocalChat:
                 "model": self.model,
                 "messages": messages,
                 "stream": True,
-                **({"think": False} if self.model == "qwen3:8b" else {}),
-                "options": {"num_ctx": 8192, "num_predict": 512, "temperature": 0.6},
+                **({"think": True} if self.model.startswith('deepseek-r1') else {"think": False} if self.model == "qwen3:8b" else {}),
+                "options": {"num_ctx": 8192, "num_predict": 2048 if self.model.startswith('deepseek-r1') else 512, "temperature": 0.6},
                 "keep_alive": "5m",
             }, ensure_ascii=False).encode("utf-8"),
             headers={"Content-Type": "application/json"},
@@ -106,6 +129,7 @@ class LocalChat:
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         answer = []
         completed = False
+        exhausted = False
         try:
             with opener.open(request, timeout=180) as response:
                 for line in response:
@@ -117,8 +141,10 @@ class LocalChat:
                     content = chunk.get("message", {}).get("content", "")
                     if content:
                         answer.append(content)
-                        yield content
+                        if not self.model.startswith('deepseek-r1'):
+                            yield content
                     if chunk.get("done"):
+                        exhausted = chunk.get('done_reason') == 'length'
                         completed = True
                         break
         except urllib.error.HTTPError as error:
@@ -129,8 +155,16 @@ class LocalChat:
             raise RuntimeError("连接本地模型失败或超时。请先打开 Ollama，再重试。") from None
         except (json.JSONDecodeError, UnicodeDecodeError):
             raise RuntimeError("本地模型返回了无法读取的数据，请重试。") from None
+        if self.model.startswith('deepseek-r1') and exhausted:
+            raise RuntimeError('模型达到本轮生成上限，最终回答未完成；思考和不完整回答不会显示或保存。请缩短问题后重试。')
         if not completed or not answer:
             raise RuntimeError("模型没有完整返回回答，请重试；本次内容未加入对话历史。")
+        if self.model.startswith('deepseek-r1'):
+            visible = visible_reasoning_answer(''.join(answer))
+            if not visible:
+                raise RuntimeError('模型未返回完整的最终回答，思考内容不会显示或保存。请缩短问题后重试。')
+            answer = [visible]
+            yield visible
         self.history = history + [
             {"role": "user", "content": question},
             {"role": "assistant", "content": "".join(answer)},

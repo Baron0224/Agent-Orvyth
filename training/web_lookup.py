@@ -4,6 +4,7 @@ import os
 import re
 import urllib.parse
 import urllib.request
+from live_news import is_news_request, lookup_news
 
 
 def should_search(text):
@@ -12,12 +13,16 @@ def should_search(text):
         return False
     if len(text) > 120 or re.search(r'密码|密钥|身份证|银行卡|住址|手机号|验证码', text):
         return False
+    if is_news_request(text):
+        return True
     if re.search(r'我(很|有点|觉得|感到|最近|今天|为什么|想|不想|累|难过|伤心|孤独)', text):
         return False
     return bool(re.search(r'什么是|是什么|是谁|何时|什么时候|多少|哪年|哪里|为什么|如何|怎么|最新|新闻|现在|目前', text))
 
 
 def lookup(text):
+    if is_news_request(text):
+        return lookup_news(text)
     key = os.environ.get('TAVILY_API_KEY', '').strip()
     if key:
         req = urllib.request.Request('https://api.tavily.com/search',
