@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>小柴</title>
+<link rel="stylesheet" href="./pet.css">
+</head>
+<body>
+  <div id="stage" aria-label="桌面小柴"></div>
+
+  <div id="bubble" class="bubble" hidden></div>
+
+  <div id="ask" class="ask" hidden>
+    <input id="ask-input" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="跟小柴说句话，回车发送">
+  </div>
+
+  <nav id="menu" class="menu" hidden>
+    <button type="button" data-act="talk">说点什么</button>
+    <button type="button" data-act="chat">打开聊天页</button>
+    <button type="button" data-act="quit">退出桌宠</button>
+  </nav>
+
+  <script>
+    // 模块加载失败时至少能看到原因（此时 3D 还没起来，只有这个气泡能显示）
+    (function () {
+      function fail(text) {
+        var b = document.getElementById('bubble');
+        if (!b) return;
+        b.hidden = false;
+        b.textContent = text;
+      }
+      window.addEventListener('error', function (e) {
+        if (e && e.message) fail('加载出错：' + e.message);
+      });
+      window.addEventListener('unhandledrejection', function (e) {
+        var r = e && e.reason;
+        fail('加载出错：' + (r && r.message ? r.message : r));
+      });
+    })();
+  </script>
+  <script type="module" src="./pet.js"></script>
+</body>
+</html>

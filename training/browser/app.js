@@ -3,6 +3,7 @@ const input = $('#message'), send = $('#send'), clear = $('#clear');
 const messages = $('#messages'), area = $('#scroll-area'), notice = $('#notice');
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let state = null, activeChat = null, busy = false, ready = false, initialized = false;
+let currentReply = null;
 let draftAvatar = '', managingChat = null, petTimer = null, confirmResolve = null;
 const taskBusy = new Set();
 function setNotice(text = '') { notice.textContent = text; }
@@ -65,12 +66,12 @@ notificationButton.addEventListener('click', async () => {
 });
 notificationSettings();
 function controls() {
-  send.disabled = busy || !ready || !initialized || !input.value.trim();
+  send.disabled = busy ? !currentReply : (!ready || !initialized || !input.value.trim());
   clear.disabled = busy || !initialized || !messages.children.length;
-  $('#new-chat').disabled = busy || !initialized;
-  document.querySelectorAll('.chat-open,.chat-more').forEach(button => { button.disabled = busy; });
+  $('#new-chat').disabled = !initialized;
+  document.querySelectorAll('.chat-open,.chat-more').forEach(button => { button.disabled = !initialized; });
   document.querySelectorAll('[data-prompt]').forEach(button => { button.disabled = busy || !ready || !initialized; });
-  send.querySelector('span').textContent = busy ? '回复中' : '发送';
+  send.querySelector('span').textContent = busy ? '停止' : '发送';
   input.readOnly = busy;
 }
 function resize() {
@@ -229,6 +230,14 @@ function interactPet() {
   const lines = ['被你点到了。我在呢，想说什么就慢慢说。', '收到你的摸摸了。今天也想听你说说。', count ? `还有 ${count} 件小事，我们可以一件件来。` : '今天的小事和大事，都可以放在这里。'];
   setPet('happy', lines[Math.floor(Math.random() * lines.length)]);
 }
+function stopReply(showNotice=true) {
+  const run=currentReply;if(!run)return;
+  currentReply=null;run.controller.abort();run.writer.cancel();
+  run.answer.entry.classList.remove('pending');run.answer.entry.classList.add('stopped');
+  busy=false;resize();
+  if(showNotice)setNotice(run.networkDone?'已停止显示，完整已生成回答仍保留在聊天记录中。':'已停止当前回复；中断前的文字可能未完整保存。');
+}
+window.addEventListener('pagehide',()=>stopReply(false));
 async function submit(text) {
   text = text.trim();
   if (!text || busy || !ready || !initialized) return;
@@ -239,21 +248,28 @@ async function submit(text) {
   addMessage('user', text); const answer = addMessage('assistant', '正在想怎么回答…', false);
   answer.entry.classList.add('pending'); follow(true); setPet('thinking', '这句话我听见了，正在认真想。');
   let output = '', done = false, taskActive = false;
+  const run={controller:new AbortController(),answer,networkDone:false,writer:null};
+  run.writer=window.OrvythTypewriter.create({render:visible=>{
+    if(currentReply!==run || activeChat!==conversation)return;
+    const nearBottom=area.scrollHeight-area.scrollTop-area.clientHeight<180;
+    answer.entry.classList.remove('pending');answer.body.textContent=formatAssistantText(visible);follow(nearBottom);
+  }});
+  currentReply=run;controls();
   try {
-    const response = await fetch('/api/chat', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,chat_id:conversation})});
+    const response = await fetch('/api/chat', {signal:run.controller.signal,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,chat_id:conversation})});
     if (!response.ok) { const data = await response.json(); throw new Error(data.error || '暂时无法回答，请重试。'); }
     const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
     const consume = line => {
+      if(currentReply!==run)return;
       if (!line.trim()) return; const event = JSON.parse(line);
       if (event.type === 'error') throw new Error(event.message);
       if (event.type === 'task') { taskActive=event.task.state==='running'; window.OrvythTaskProgress.render(answer.entry,event.task); }
-      if (event.type === 'done') done = true;
+      if (event.type === 'done') {done = true;run.networkDone=true;}
       if (event.type === 'status' && !output) answer.body.textContent = event.message;
       if (event.type === 'tool' && !output) answer.body.textContent = (event.name === 'list_project' ? '正在查看目录：' : '正在读取：') + event.path;
       if (event.type === 'delta') {
         if (!output) setPet('speaking', '想好一点，就先说给你听。');
-        const nearBottom = area.scrollHeight - area.scrollTop - area.clientHeight < 180;
-        output += event.content; answer.entry.classList.remove('pending'); answer.body.textContent = formatAssistantText(output); follow(nearBottom);
+        output += event.content; run.writer.append(event.content);
       }
     };
     try {
@@ -264,18 +280,25 @@ async function submit(text) {
       }
       if (buffer.trim()) consume(buffer);
       if (!done || !output) throw new Error('回复中断，请稍后重试。');
+      await run.writer.finish();
+      if(currentReply!==run)return;
       answer.copy.hidden = false;
     } finally { await reader.cancel().catch(() => {}); }
-    try { applyState(await requestJSON('/api/session')); } catch { setNotice('回答已收到，列表暂时未刷新。'); }
+    try { const next=await requestJSON('/api/session'); if(currentReply!==run || activeChat!==conversation)return; applyState(next); } catch { if(currentReply===run)setNotice('回答已收到，列表暂时未刷新。'); }
+    if(currentReply!==run)return;
     input.focus(); setPet('idle', '我听着呢，想继续说就接着说。');
   } catch (error) {
+    run.writer.cancel();
+    if(currentReply!==run)return;
     if(taskActive) window.OrvythTaskProgress.render(answer.entry,{state:'failed',steps:[{label:'连接中断，任务结果尚未确认。请检查文件后再重试。'}]});
-    answer.entry.classList.remove('pending'); answer.entry.classList.add('failed'); answer.body.textContent = output || '这次没能收到回答。';
+    answer.entry.classList.remove('pending'); answer.entry.classList.add('failed'); answer.body.textContent = run.writer.text || '这次没能收到回答。';
     setNotice(error.message || '服务暂时无法连接，请重试。'); input.value = text; setPet('idle', '这次连接没跟上，我们可以再试一次。');
-  } finally { busy = false; resize(); }
+  } finally { if(currentReply===run){currentReply=null;busy=false;resize();} }
 }
 async function conversationAction(path, data) {
-  if (busy || !initialized) return;
+  if (!initialized) return;
+  if(currentReply)stopReply(false);
+  if(busy)return;
   busy = true; controls(); setNotice();
   try { applyState(await requestJSON(path, data), true); input.value = ''; closeDrawers(); }
   catch (error) { setNotice(error.message); }
@@ -302,17 +325,19 @@ async function updateTask(task, action, extra = {}) {
   } catch (error) { $('#task-notice').textContent = error.message; }
   finally { taskBusy.delete(task.id); renderTasks(); }
 }
-function openSettings() {
+async function openSettings() {
   if (!state) return;
   $('#profile-menu').hidden = true; $('#profile-button').setAttribute('aria-expanded','false');
   const profile = state.profile; draftAvatar = profile.avatar;
   selectPetDraft(profile.pet_kind || 'dog');
   $('#name-input').value = profile.name; $('#pet-name-input').value = profile.pet_name; $('#motion-input').checked = profile.pet_motion;
+  $('#address-input').value = profile.user_address || '';
   paintAvatar($('#avatar-edit'), draftAvatar, profile.name); $('#settings-error').textContent = ''; $('#settings-dialog').showModal();
+
 }
 function closeDrawers() { $('#sidebar').classList.remove('open'); $('#companion-panel').classList.remove('open'); $('#drawer-shade').hidden = true; }
 function openDrawer(id) { closeDrawers(); $(id).classList.add('open'); $('#drawer-shade').hidden = false; }
-$('#composer').addEventListener('submit', event => { event.preventDefault(); submit(input.value); });
+$('#composer').addEventListener('submit', event => { event.preventDefault(); if(currentReply)stopReply();else submit(input.value); });
 input.addEventListener('input', resize);
 input.addEventListener('keydown', event => {
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); submit(input.value); }
@@ -349,8 +374,8 @@ $('#settings-form').noValidate = true;
 $('#settings-form').addEventListener('submit', async event => {
   event.preventDefault(); $('#settings-save').disabled = true; $('#settings-error').textContent = '';
   try {
-    const data = await requestJSON('/api/profile',{name:$('#name-input').value,pet_name:$('#pet-name-input').value,pet_motion:$('#motion-input').checked,pet_kind:$('#pet-kind-input').value,avatar:draftAvatar});
-    applyState(data); $('#settings-dialog').close(); setNotice('设置已保存在本机。');
+    const data = await requestJSON('/api/profile',{name:$('#name-input').value,pet_name:$('#pet-name-input').value,pet_motion:$('#motion-input').checked,pet_kind:$('#pet-kind-input').value,avatar:draftAvatar,user_address:$('#address-input').value});
+    applyState(data); $('#settings-dialog').close(); await checkConnection(); setNotice('设置已保存在本机，后续回复将使用新设置。');
   } catch(error) { $('#settings-error').textContent = error.message; }
   finally { $('#settings-save').disabled = false; }
 });
@@ -396,7 +421,7 @@ initialize();
 
 function selectPetDraft(kind){
  $('#pet-kind-input').value=kind;
- $('#chosen-pet-label').textContent=kind==='cat'?'小猫 ›':'小柴犬 ›';
+ $('#chosen-pet-label').textContent=kind==='cat'?'小猫 ›':kind==='rabbit'?'小兔子 ›':kind==='robot'?'小机器人 ›':'小柴犬 ›';
  document.querySelectorAll('[data-pet-kind]').forEach(card=>card.setAttribute('aria-pressed',String(card.dataset.petKind===kind)));
 }
 $('#choose-pet').addEventListener('click',()=>$('#pet-choice-dialog').showModal());

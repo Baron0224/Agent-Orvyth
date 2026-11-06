@@ -1,5 +1,6 @@
 """浏览器版的本机 SQLite 存储，不写入 Git 仓库。"""
 
+from chat_preferences import DEFAULTS, RETIRED, addressed, validate as validate_preferences
 import base64
 from contextlib import contextmanager
 import hashlib
@@ -123,7 +124,7 @@ class Store:
                 item={'role':row['role'],'content':row['content']}
                 if row['task_trace']: item['task_trace']=json.loads(row['task_trace'])
                 messages.append(item)
-            return {"profile": json.loads(profile["profile"]), "chats": chats, "tasks": tasks,
+            return {"profile": {**DEFAULTS, **{k: v for k, v in json.loads(profile["profile"]).items() if k not in RETIRED}}, "chats": chats, "tasks": tasks,
                     "active_chat": profile["active_chat"], "messages": messages}
 
     def history(self, owner, chat):
@@ -162,6 +163,8 @@ class Store:
     def save_pair(self, owner, chat, question, answer, task_trace=None):
         with self.connect() as db:
             row = self.require_chat(db, owner, chat)
+            address = json.loads(db.execute("SELECT profile FROM owners WHERE id=?", (owner,)).fetchone()["profile"]).get("user_address", "")
+            answer = addressed(answer, address)
             db.executemany("INSERT INTO messages(chat,role,content) VALUES (?,?,?)", [
                 (chat, "user", question), (chat, "assistant", answer)])
             if task_trace:
@@ -170,6 +173,8 @@ class Store:
             if not row["manual_title"] and title == "新聊天":
                 title = re.sub(r"\s+", " ", question).strip()[:24]
             db.execute("UPDATE chats SET title=?,updated=? WHERE id=?", (title, time.time(), chat))
+
+        return answer
 
     @staticmethod
     def text(value, limit, label):
@@ -183,8 +188,8 @@ class Store:
         avatar = payload.get("avatar", "")
         motion = payload.get("pet_motion", True)
         kind = payload.get("pet_kind")
-        if kind is not None and kind not in ("dog", "cat"):
-            raise ValueError("请选择小狗或小猫。")
+        if kind is not None and kind not in ("dog", "cat", "rabbit", "robot"):
+            raise ValueError("请选择小狗、小猫、小兔子或小机器人。")
         if not isinstance(motion, bool) or not isinstance(avatar, str):
             raise ValueError("资料格式不正确。")
         if avatar:
@@ -199,6 +204,10 @@ class Store:
                 raise ValueError("头像请使用不超过 150KB 的 PNG 图片。") from None
         profile = {"name": name, "pet_name": pet_name, "avatar": avatar, "pet_motion": motion}
         with self.connect() as db:
+            previous = db.execute("SELECT profile FROM owners WHERE id=?", (owner,)).fetchone()
+            old_profile = json.loads(previous["profile"])
+            preferences = validate_preferences({key: payload.get(key, old_profile.get(key, default)) for key, default in DEFAULTS.items()})
+            profile.update(preferences)
             if kind is None:
                 previous = db.execute("SELECT profile FROM owners WHERE id=?", (owner,)).fetchone()
                 kind = json.loads(previous["profile"]).get("pet_kind", "dog")
@@ -244,6 +253,8 @@ class Store:
             if result is None:
                 return None
             reply, next_draft, task = result
+            address = json.loads(db.execute("SELECT profile FROM owners WHERE id=?", (owner,)).fetchone()['profile']).get('user_address', '')
+            reply = addressed(reply, address)
             if next_draft is None:
                 db.execute("DELETE FROM reminder_drafts WHERE chat=? AND owner=?", (chat, owner))
             else:

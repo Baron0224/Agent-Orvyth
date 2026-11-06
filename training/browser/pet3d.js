@@ -1,10 +1,10 @@
 import * as T from '/companion3d/vendor/three.module.js';
-import {makeDog,makeCat} from '/companion3d/model.js';
+import {makeDog,makeCat,makeRabbit,makeRobot} from '/companion3d/model.js';
 
 const stage=document.getElementById('pet');
 const reduced=matchMedia('(prefers-reduced-motion: reduce)');
 const clamp=T.MathUtils.clamp,random=(a,b)=>a+Math.random()*(b-a);
-let renderer,rig,scene,camera,clippingPlane,frame=0,lastTime=0;
+let renderer,rig,scene,camera,clippingPlane,petWall,petBack,frame=0,lastTime=0;
 const rigs=new Map();let currentKind=null;
 let pointer={x:0,y:0},lastInput=-Infinity,nextIdle=0,action=null,actionStart=0,nextBlink=0,blinkStart=-Infinity;
 let box,frames=0,frameStart=0;
@@ -40,6 +40,7 @@ function draw(nowMs){
  rotate(rig.spine,lean+breath*.003,yaw*.10,0,a*.6);
  rotate(rig.neck,pitch*.35,yaw*.30,tilt*.30,a);
  rotate(rig.head,pitch*.65,yaw*.60,tilt*.70,a);
+ if(rig.earRoots)rig.earRoots.forEach((ear,i)=>{ear.rotation.z=motion?Math.sin(now*1.15+i*1.7)*.022:0;});
  for(let i=0;i<rig.tailBones.length;i++)rig.tailBones[i].rotation.y=(wag+(motion?Math.sin(now*1.1)*.012:0))*(1-i*.14);
  if(motion&&now>nextBlink){blinkStart=now;nextBlink=now+random(3.5,6.5);}
  const bt=now-blinkStart,blink=motion&&bt>=0&&bt<.2?Math.sin(Math.PI*bt/.2)**2:0;
@@ -52,14 +53,20 @@ function start(){if(frame||!rig||document.hidden)return;lastTime=0;frame=request
 function stop(){cancelAnimationFrame(frame);frame=0;lastTime=0;}
 function changeCharacter(kind){
  if(!scene||!clippingPlane)return;
- kind=kind==='cat'?'cat':'dog';if(kind===currentKind)return;
+ kind=['cat','rabbit','robot'].includes(kind)?kind:'dog';if(kind===currentKind)return;
  stop();if(rig)scene.remove(rig.dog);
  if(!rigs.has(kind)){
-  const next=kind==='cat'?makeCat():makeDog();next.dog.position.z=.32;next.tailBones[0].parent.visible=false;
+  const next=kind==='cat'?makeCat():kind==='rabbit'?makeRabbit():kind==='robot'?makeRobot():makeDog();next.dog.position.z=.32;next.tailBones[0].parent.visible=false;
+  if(kind==='rabbit'){next.dog.scale.setScalar(.90);next.dog.position.y=-.03;}
+  if(kind==='robot'){next.dog.position.y=-.02;}
   next.dog.traverse(object=>{if(object.isMesh||object.isLine)for(const material of (Array.isArray(object.material)?object.material:[object.material])){material.clippingPlanes=[clippingPlane];material.clipShadows=true;}});
   rigs.set(kind,next);
  }
  rig=rigs.get(kind);currentKind=kind;scene.add(rig.dog);stage.dataset.kind=kind;
+ // All four pets share the same opening, camera and studio lights.
+ if(petWall)petWall.visible=true;
+ if(petBack)petBack.material.color.set('#a8998a');
+ camera.zoom=kind==='rabbit'?1.08:kind==='robot'?1.04:1;
  stage.dataset.vertices=String(rig.mesh.geometry.attributes.position.count);
  action=null;lastInput=-Infinity;nextIdle=performance.now()/1000+4;nextBlink=performance.now()/1000+2;blinkStart=-Infinity;
  resize();start();
@@ -85,11 +92,13 @@ try{
  opening.moveTo(...edge[0]);for(const point of edge.slice(1))opening.lineTo(...point);opening.closePath();shape.holes.push(opening);
  const wall=new T.Mesh(new T.ExtrudeGeometry(shape,{depth:.10,bevelEnabled:false,curveSegments:32}),new T.MeshStandardMaterial({color:'#eee8df',roughness:1,side:T.DoubleSide}));
  wall.position.z=wallDepth;scene.add(wall);
+ petWall=wall;
  const back=new T.Mesh(new T.PlaneGeometry(4,4),new T.MeshStandardMaterial({color:'#a8998a',roughness:1}));
  back.position.set(0,holeCenter,-.85);scene.add(back);
+ petBack=back;
  changeCharacter(stage.dataset.kind || 'dog');
  const selected=currentKind;
- for(const kind of ['dog','cat']){changeCharacter(kind);renderer.render(scene,camera);document.getElementById('pet-thumb-'+kind).src=renderer.domElement.toDataURL('image/png');}
+ for(const kind of ['dog','cat','rabbit','robot']){changeCharacter(kind);renderer.render(scene,camera);document.getElementById('pet-thumb-'+kind).src=renderer.domElement.toDataURL('image/png');}
  changeCharacter(selected);
  stage.dataset.mesh='skinned-3d';stage.dataset.activity='rest';stage.dataset.vertices=String(rig.mesh.geometry.attributes.position.count);
  const now=performance.now()/1000;nextIdle=now+4.5;nextBlink=now+2;resize();start();

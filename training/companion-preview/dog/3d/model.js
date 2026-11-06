@@ -184,3 +184,122 @@ export function makeCat(){
  const tailGroup=new T.Group(),tailBones=[new T.Bone()];tailGroup.add(tailBones[0]);dog.add(tailGroup);
  return {dog,root,spine,neck,head,eyes,eyeHeight:.137,tailBones,mesh};
 }
+
+// Rabbit uses the kitten's actual layered eye, muzzle, fur and rig construction.
+export function makeRabbit(){
+ const dog=new T.Group(),root=new T.Bone(),spine=new T.Bone(),neck=new T.Bone(),head=new T.Bone();
+ spine.position.y=.8;neck.position.y=.4;head.position.y=.22;dog.add(root);root.add(spine);spine.add(neck);neck.add(head);
+ const cream=new T.MeshStandardMaterial({color:'#fff4df',roughness:.93});
+ const charcoal=new T.MeshStandardMaterial({color:'#bda78c',roughness:.92});
+ const pink=new T.MeshStandardMaterial({color:'#cf968c',roughness:.83});
+ const mouthMat=new T.MeshStandardMaterial({color:'#755247',roughness:1});
+ const black=new T.MeshPhysicalMaterial({color:'#0c0b09',roughness:.12,clearcoat:1,clearcoatRoughness:.08});
+ const gold=new T.MeshPhysicalMaterial({color:'#8c6944',roughness:.29,clearcoat:.7});
+ const highlight=new T.MeshBasicMaterial({color:'#fffdf5'});
+ const sphere=new T.SphereGeometry(1,64,48);
+ function ball(parent,x,y,z,sx,sy,sz,mat){const m=new T.Mesh(sphere,mat);m.position.set(x,y,z);m.scale.set(sx,sy,sz);parent.add(m);m.castShadow=true;return m;}
+ let seed=71831;const rand=()=>{seed=(1664525*seed+1013904223)>>>0;return seed/4294967296;};
+ const white=new T.Color('#f9efdf'),orange=new T.Color('#d9954e'),dark=new T.Color('#332922');
+ function coat(x,y,z,body=false){
+  // Same vertex-colour coat as the kitten, with a quiet ivory/beige rabbit palette.
+  const shade=T.MathUtils.smoothstep(Math.abs(x),.60,.98)*(1-T.MathUtils.smoothstep(z,.1,.65));
+  return new T.Color('#f9efdf').lerp(new T.Color('#d8c4a8'),shade*.24);
+ }
+ function furry(parent,pos,size,body=false,count=6000){
+  const geo=sphere.clone(),colors=[],v=new T.Vector3();
+  for(let i=0;i<geo.attributes.position.count;i++){v.fromBufferAttribute(geo.attributes.position,i);const c=coat(v.x,v.y,v.z,body);colors.push(c.r,c.g,c.b);}
+  geo.setAttribute('color',new T.Float32BufferAttribute(colors,3));
+  const mesh=new T.Mesh(geo,new T.MeshStandardMaterial({vertexColors:true,roughness:.98}));mesh.position.set(...pos);mesh.scale.set(...size);mesh.castShadow=true;parent.add(mesh);
+  const points=[],hairColors=[];
+  for(let i=0;i<count;i++){
+   const y=rand()*2-1,a=rand()*Math.PI*2,r=Math.sqrt(1-y*y),x=Math.cos(a)*r,z=Math.sin(a)*r;
+   const c=coat(x,y,z,body).multiplyScalar(.95+rand()*.10),length=.005+rand()*.010;
+   const bx=pos[0]+x*size[0],by=pos[1]+y*size[1],bz=pos[2]+z*size[2];
+   points.push(bx,by,bz,bx+x*length,by+y*length-length*.25,bz+z*length);
+   hairColors.push(c.r,c.g,c.b,c.r,c.g,c.b);
+  }
+  const hairs=new T.BufferGeometry();hairs.setAttribute('position',new T.Float32BufferAttribute(points,3));hairs.setAttribute('color',new T.Float32BufferAttribute(hairColors,3));
+  parent.add(new T.LineSegments(hairs,new T.LineBasicMaterial({vertexColors:true,transparent:true,opacity:.25})));
+  return mesh;
+ }
+ furry(spine,[0,.34,.03],[.32,.48,.29],true,4000);
+ const mesh=furry(head,[0,.33,.12],[.48,.405,.365],false,14000);
+ // Broad, rounded upright ears, with slightly different tips and recessed interiors.
+ const earRoots=[];
+ for(const side of [-1,1]){
+  const earRoot=new T.Group();earRoot.position.set(side*.23,.60,.055);head.add(earRoot);earRoots.push(earRoot);
+  const h=side<0?.035:0,point=(x,y)=>[side*(x-.23),y-.60];
+  const shape=new T.Shape();shape.moveTo(...point(.16,.58));
+  shape.bezierCurveTo(...point(.12,.86),...point(.18,1.20+h),...point(.27,1.24+h));
+  shape.bezierCurveTo(...point(.37,1.27+h),...point(.43,.95),...point(.35,.64));
+  shape.quadraticCurveTo(...point(.28,.52),...point(.16,.58));shape.closePath();
+  const ear=new T.Mesh(new T.ExtrudeGeometry(shape,{depth:.055,bevelEnabled:true,bevelSegments:5,steps:1,bevelSize:.025,bevelThickness:.025,curveSegments:32}),cream);ear.castShadow=true;ear.name='rabbit-upright-ear';earRoot.add(ear);
+  const inner=new T.Shape();inner.moveTo(...point(.205,.66));
+  inner.bezierCurveTo(...point(.18,.87),...point(.23,1.13+h),...point(.28,1.16+h));
+  inner.bezierCurveTo(...point(.33,1.17+h),...point(.36,.94),...point(.30,.70));
+  inner.quadraticCurveTo(...point(.26,.63),...point(.205,.66));inner.closePath();
+  const inset=new T.Mesh(new T.ShapeGeometry(inner,24),new T.MeshStandardMaterial({color:'#ddc3b4',roughness:.95,side:T.DoubleSide}));inset.position.z=.084;earRoot.add(inset);
+ }
+ const eyes=[];
+ for(const side of [-1,1]){
+  ball(head,side*.205,.352,.432,.116,.132,.050,charcoal);
+  const eye=ball(head,side*.205,.352,.452,.104,.119,.050,gold);eyes.push(eye);
+  ball(eye,0,.035,.53,.79,.86,.68,black);
+  ball(eye,-.32,.46,1.08,.15,.15,.06,highlight);
+  ball(eye,.30,-.33,1.12,.065,.065,.04,highlight);
+  // Small soft muzzle; broad white colouring is carried by the head itself.
+  ball(head,side*.066,.145,.452,.085,.066,.041,cream);
+  for(let line=0;line<2;line++){
+   const y=.16-line*.029;
+   const curve=new T.CatmullRomCurve3([new T.Vector3(side*.125,y,.47),new T.Vector3(side*.30,y+.016,.48),new T.Vector3(side*.46,y+.03-line*.025,.40)]);
+   head.add(new T.Mesh(new T.TubeGeometry(curve,14,.0013,4,false),cream));
+  }
+ }
+ const noseShape=new T.Shape();noseShape.moveTo(-.033,.205);noseShape.quadraticCurveTo(0,.216,.033,.205);noseShape.quadraticCurveTo(.02,.19,0,.175);noseShape.quadraticCurveTo(-.02,.19,-.033,.205);
+ const nose=new T.Mesh(new T.ExtrudeGeometry(noseShape,{depth:.009,bevelEnabled:true,bevelSegments:3,bevelSize:.006,bevelThickness:.004}),pink);nose.position.z=.498;head.add(nose);
+ const lipPaths=[[[0,.18,.503],[0,.146,.504]],[[0,.146,.504],[-.022,.125,.49],[-.049,.121,.484]],[[0,.146,.504],[.022,.125,.49],[.049,.121,.484]]];
+ for(const points of lipPaths){const curve=new T.CatmullRomCurve3(points.map(p=>new T.Vector3(...p)));head.add(new T.Mesh(new T.TubeGeometry(curve,10,.002,5,false),mouthMat));}
+ const tailGroup=new T.Group(),tailBones=[new T.Bone()];tailGroup.add(tailBones[0]);dog.add(tailGroup);
+ return {dog,root,spine,neck,head,eyes,eyeHeight:.119,tailBones,mesh,earRoots};
+}
+
+// Robot companion: same bones, scale and framing as the animals, but built from
+// rounded plastic shells so it still reads as a pet at thumbnail size.
+export function makeRobot(){
+ const dog=new T.Group(),root=new T.Bone(),spine=new T.Bone(),neck=new T.Bone(),head=new T.Bone();
+ spine.position.y=.8;neck.position.y=.4;head.position.y=.22;dog.add(root);root.add(spine);spine.add(neck);neck.add(head);
+ const shell=new T.MeshStandardMaterial({color:'#e9e4da',roughness:.42,metalness:.05});
+ const joint=new T.MeshStandardMaterial({color:'#c9c0b2',roughness:.62,metalness:.08});
+ const visor=new T.MeshPhysicalMaterial({color:'#2e3a41',roughness:.20,clearcoat:.85,clearcoatRoughness:.15});
+ const glow=new T.MeshStandardMaterial({color:'#123a3a',emissive:'#5fd3cc',emissiveIntensity:1.6,roughness:.45});
+ const spark=new T.MeshBasicMaterial({color:'#f2fffd'});
+ const accent=new T.MeshStandardMaterial({color:'#a6d8d2',roughness:.50,metalness:.10});
+ const sphere=new T.SphereGeometry(1,64,48);
+ function ball(parent,x,y,z,sx,sy,sz,mat){const m=new T.Mesh(sphere,mat);m.position.set(x,y,z);m.scale.set(sx,sy,sz);parent.add(m);m.castShadow=true;return m;}
+ // Torso: soft barrel, waist joint, chest screen and rounded shoulder caps.
+ ball(spine,0,.34,.03,.325,.40,.275,shell);
+ ball(spine,0,.05,.05,.285,.21,.25,joint);
+ ball(spine,0,.60,.06,.135,.085,.135,joint);
+ ball(spine,0,.35,.20,.215,.16,.06,joint);
+ ball(spine,0,.35,.245,.155,.105,.02,visor);
+ ball(spine,0,.35,.262,.085,.055,.012,glow);
+ for(const side of [-1,1])ball(spine,side*.335,.45,.02,.085,.105,.085,accent);
+ // Head: rounded shell, recessed face frame and a dark screen the eyes sit on.
+ const mesh=ball(head,0,.33,.12,.455,.375,.355,shell);
+ head.scale.setScalar(1.15);
+ ball(head,0,.34,.415,.345,.265,.075,joint);
+ ball(head,0,.34,.465,.315,.235,.055,visor);
+ const eyes=[];
+ for(const side of [-1,1]){
+  eyes.push(ball(head,side*.135,.365,.505,.088,.106,.030,glow));
+  ball(head,side*.135,.392,.528,.030,.034,.012,spark);
+  ball(head,side*.45,.33,.06,.055,.115,.115,accent);
+ }
+ const smile=new T.CatmullRomCurve3([new T.Vector3(-.055,.214,.514),new T.Vector3(0,.186,.522),new T.Vector3(.055,.214,.514)]);
+ head.add(new T.Mesh(new T.TubeGeometry(smile,14,.0072,8,false),glow));
+ // Antenna on the crown keeps the silhouette readable when the card is small.
+ const rod=new T.Mesh(new T.CylinderGeometry(.0075,.0075,.19,12),joint);rod.position.set(0,.80,.10);rod.castShadow=true;head.add(rod);
+ ball(head,0,.915,.10,.038,.038,.038,glow);
+ const tailGroup=new T.Group(),tailBones=[new T.Bone()];tailGroup.add(tailBones[0]);dog.add(tailGroup);
+ return {dog,root,spine,neck,head,eyes,eyeHeight:.106,tailBones,mesh};
+}
