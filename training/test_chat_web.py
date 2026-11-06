@@ -304,7 +304,7 @@ class WebChatTest(unittest.TestCase):
         with patch.dict('os.environ',{'TAVILY_API_KEY':''}),patch('chat_web.lookup',return_value=source) as lookup:
             status,_,events=self.send('说出2026.11.4的新闻')
         self.assertEqual(status,200);lookup.assert_called_once()
-        self.assertEqual(events[0]['content'],'测试回答')
+        self.assertEqual(''.join(event.get('content','') for event in events),'测试回答')
 
     def test_repeated_login_request_asks_for_missing_evidence(self):
         question='我现在不想休息，想解决登录报错，先检查什么'

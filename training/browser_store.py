@@ -42,6 +42,8 @@ class Store:
                     id TEXT PRIMARY KEY, owner TEXT NOT NULL, title TEXT NOT NULL,
                     done INTEGER NOT NULL DEFAULT 0, created REAL NOT NULL);
             """)
+            if 'search_evidence' not in {row['name'] for row in db.execute('PRAGMA table_info(messages)')}:
+                db.execute('ALTER TABLE messages ADD COLUMN search_evidence TEXT')
             columns = {row["name"] for row in db.execute("PRAGMA table_info(tasks)")}
             if 'task_trace' not in {row['name'] for row in db.execute('PRAGMA table_info(messages)')}:
                 db.execute('ALTER TABLE messages ADD COLUMN task_trace TEXT')
@@ -160,13 +162,15 @@ class Store:
             else:
                 raise ValueError("未知聊天操作。")
 
-    def save_pair(self, owner, chat, question, answer, task_trace=None):
+    def save_pair(self, owner, chat, question, answer, task_trace=None, search_evidence=None):
         with self.connect() as db:
             row = self.require_chat(db, owner, chat)
             address = json.loads(db.execute("SELECT profile FROM owners WHERE id=?", (owner,)).fetchone()["profile"]).get("user_address", "")
             answer = addressed(answer, address)
             db.executemany("INSERT INTO messages(chat,role,content) VALUES (?,?,?)", [
                 (chat, "user", question), (chat, "assistant", answer)])
+            if search_evidence:
+                db.execute('UPDATE messages SET search_evidence=? WHERE id=last_insert_rowid()', (json.dumps(search_evidence,ensure_ascii=False),))
             if task_trace:
                 db.execute('UPDATE messages SET task_trace=? WHERE id=last_insert_rowid()', (json.dumps(task_trace,ensure_ascii=False),))
             title = row["title"]
