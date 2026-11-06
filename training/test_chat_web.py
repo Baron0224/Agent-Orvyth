@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import patch
 from chat_web import ChatServer, WEB_PRIVACY, WEB_PROMPT
 from chat_local import LocalChat, PRIVACY_NOTICE
+from chat_preferences import DEFAULTS
 
 PNG = 'data:image/png;base64,' + 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII='
 def fake_reply(chat, question):
@@ -79,6 +80,92 @@ class WebChatTest(unittest.TestCase):
             with patch('chat_web.run_project') as run:
                 self.assertEqual(self.request('POST', '/api/pi/run', payload)[0], 400)
                 run.assert_not_called()
+    def test_address_only_and_retired_preferences_ignored(self):
+        profile = self.state()['profile']
+        status, _, saved = self.request('POST', '/api/profile', {**profile, 'chat_model': 'qwen3:8b', 'closeness': 'friendly', 'reply_length': 'long', 'user_address': 'BOOS'})
+        self.assertEqual(status, 200)
+        self.assertNotIn('chat_model', saved['profile'])
+        observed=[]
+        def reply(chat, question):
+            observed.append(chat.model)
+            yield '第一段'
+            yield '第二段'
+        with patch('chat_web.LocalChat.reply',reply):
+            _, _, events=self.request('POST','/api/chat',{'chat_id':self.chat,'message':'陪我聊两句'})
+        self.assertEqual(observed,[self.server.model])
+        self.assertEqual(events[-1]['type'],'done')
+        full=''.join(e.get('content','') for e in events)
+        self.assertEqual(full.count('BOOS'),1)
+        self.assertEqual(full,self.state()['messages'][-1]['content'])
+        for question in ('你现在用什么模型','今天几号','2029.1.1新闻','记住：我喜欢简短回答','提醒我'):
+            _,_,events=self.request('POST','/api/chat',{'chat_id':self.chat,'message':question})
+            self.assertIn('BOOS',''.join(e.get('content','') for e in events))
+        self.stop();self.start()
+        self.assertEqual(self.state()['profile']['user_address'],'BOOS')
+        _,other=self.server.store.owner(create=True)
+        self.assertEqual(self.server.store.state(other)['profile']['user_address'],'')
+
+    def test_address_covers_file_success_and_failure_without_touching_task_events(self):
+        profile=self.state()['profile']
+        self.request('POST','/api/profile',{**profile,'user_address':'BOOS'})
+        for failure in (False, True):
+            with patch('chat_web.file_request',return_value={'word_write':{}}), patch('chat_web.create_word_file', side_effect=RuntimeError('写入失败') if failure else None, return_value='已保存：[下载](https://example.org/file.docx)'):
+                _,_,events=self.request('POST','/api/chat',{'chat_id':self.chat,'message':'新建文件'})
+            answer=''.join(e.get('content','') for e in events)
+            self.assertEqual(answer.count('BOOS'),1)
+            self.assertEqual(answer,self.state()['messages'][-1]['content'])
+            self.assertTrue(any(e['type']=='task' for e in events))
+            if not failure:self.assertIn('[下载](https://example.org/file.docx)',answer)
+
+    def test_address_validation_and_code_url_preservation(self):
+        from chat_preferences import addressed
+        profile=self.state()['profile']
+        for value in ('x'*25,'a\nB','a\x7f','a\u200bB',None):
+            self.assertEqual(self.request('POST','/api/profile',{**profile,'user_address':value})[0],400)
+        text='```python\nprint("boss")\n```\nhttps://example.org/boss'
+        self.assertEqual(addressed(text,'boss'),'boss，\n'+text)
+        self.assertEqual(addressed('boss，已经好了','boss'),'boss，已经好了')
+        self.assertEqual(addressed(text,''),text)
+        self.assertEqual(addressed('BOOS，\n\n你好。','BOOS'),'BOOS，你好。')
+
+    def test_both_names_come_from_separate_profile_fields(self):
+        profile=self.state()['profile']
+        self.request('POST','/api/profile',{**profile,'pet_name':'小白','user_address':'BOOS'})
+        with patch('chat_web.lookup',side_effect=AssertionError('names must not search')), patch('chat_web.LocalChat.reply',side_effect=AssertionError('names must not be guessed')):
+            _,_,events=self.request('POST','/api/chat',{'chat_id':self.chat,'message':'你叫什么，我叫什么'})
+        self.assertEqual(events[0]['content'],'我叫小白，你希望我叫你BOOS。')
+
+    def test_identity_intents_are_separate_account_facts_without_generation(self):
+        profile = self.state()['profile']
+        self.request('POST','/api/profile',{**profile,'pet_name':'小白','user_address':'BOOS'})
+        with patch('chat_web.lookup',side_effect=AssertionError('must not search')), patch('chat_web.LocalChat.reply',side_effect=AssertionError('must not guess identity')):
+            for question in ('我是谁','我叫什么','你知道我是谁吗'):
+                _,_,events=self.request('POST','/api/chat',{'chat_id':self.chat,'message':question})
+                answer=events[0]['content']
+                self.assertIn('BOOS',answer)
+                self.assertIn('不能把它当作你的真实姓名',answer)
+                self.assertNotIn('我叫小白',answer)
+            for question in ('你是谁','你叫什么'):
+                _,_,events=self.request('POST','/api/chat',{'chat_id':self.chat,'message':question})
+                self.assertIn('我叫小白',events[0]['content'])
+                self.assertIn('BOOS',events[0]['content'])
+            _,_,events=self.request('POST','/api/chat',{'chat_id':self.chat,'message':'你是什么模型'})
+            self.assertIn(self.server.model,events[0]['content'])
+        old_cookie=self.cookie
+        del self.cookie
+        _,headers,state=self.request('GET','/api/session')
+        self.cookie=headers['Set-Cookie'].split(';')[0]
+        _,_,events=self.request('POST','/api/chat',{'chat_id':state['active_chat'],'message':'我是谁'})
+        self.assertIn('还没设置',events[0]['content'])
+        self.assertNotIn('BOOS',events[0]['content'])
+        self.cookie=old_cookie
+
+    def test_identity_router_does_not_hijack_quotes_negation_or_other_tasks(self):
+        from chat_local import role_info, model_info
+        for question in ('不要回答我是谁','我不是问你是谁','“我是谁”是什么意思','解释电影《我是谁》','你是谁以及怎么写代码','你叫什么我叫什么，然后帮我写代码','你不是什么模型','你是什么模型，怎么部署'):
+            self.assertIsNone(role_info(question,'小白','BOOS'))
+            self.assertIsNone(model_info(question,'deepseek-r1:7b','小白'))
+
     def test_lookup_does_not_append_citation_footer(self):
         source = {'title': '测试百科', 'url': 'https://example.org/source', 'extract': '供测试的事实。'}
         with patch('chat_web.lookup', return_value=source):
@@ -97,7 +184,7 @@ class WebChatTest(unittest.TestCase):
             self.assertIn('Orvyth', events[0]['content'])
             self.assertIn('AI', events[0]['content'])
             _, _, repeated = self.send('你知道你叫什么名字吗')
-            self.assertNotEqual(events[0]['content'], repeated[0]['content'])
+            self.assertEqual(events[0]['content'], repeated[0]['content'])
             self.assertIn(name, repeated[0]['content'])
     def test_identity_questions_do_not_search(self):
         with patch('chat_web.lookup', side_effect=AssertionError('identity must not search')):
@@ -112,7 +199,7 @@ class WebChatTest(unittest.TestCase):
             _, _, events = self.request('POST', '/api/chat', {'chat_id': self.chat, 'message': '你现在用什么模型'})
         self.assertIn('小团', events[0]['content'])
         self.assertIn('Orvyth', events[0]['content'])
-        self.assertIn('deepseek-r1:7b', events[0]['content'])
+        self.assertIn(self.server.model, events[0]['content'])
     def test_assets_host_origin_and_input_boundaries(self):
         self.assertEqual(self.request('GET','/')[0],200)
         for asset in ('/reminder-notifications.js', '/pet3d.js', '/companion3d/model.js', '/companion3d/vendor/three.module.js', '/companion3d/vendor/three.core.js'):
@@ -184,7 +271,7 @@ class WebChatTest(unittest.TestCase):
         self.send('重启之后还要在')
         self.stop(); self.start()
         data=self.state()
-        self.assertEqual(data['profile'],profile)
+        self.assertEqual(data['profile'],{**DEFAULTS, **profile})
         self.assertEqual(data['tasks'][0]['done'],1)
         self.assertEqual(data['messages'][0]['content'],'重启之后还要在')
         self.request('POST','/api/tasks/toggle',{'id':task['id'],'done':False})
@@ -258,7 +345,7 @@ class WebChatTest(unittest.TestCase):
             build.return_value.open.return_value = io.BytesIO(raw)
             status, _, events = self.request('POST', '/api/chat', {'chat_id': self.chat, 'message': '计算17乘23'})
         self.assertEqual(status, 200)
-        self.assertEqual(events, [{'type': 'delta', 'content': '391'}, {'type': 'done', 'chat_id': self.chat}])
+        self.assertEqual([e for e in events if e['type']!='status'], [{'type': 'delta', 'content': '391'}, {'type': 'done', 'chat_id': self.chat}])
         self.assertEqual(self.state()['messages'][-1]['content'], '391')
         with patch('chat_local.urllib.request.build_opener') as build:
             build.return_value.open.return_value = io.BytesIO(b'{"message":{"thinking":"unfinished"},"done":true,"done_reason":"length"}\n')

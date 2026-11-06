@@ -4,12 +4,12 @@
 
 浏览器版已支持将聊天、任务和资料保存到本机数据库；本页介绍的终端入口仍只在运行期间保留上下文，两者保存方式不同。
 
-这个入口默认使用本机 Ollama 和现成的 `deepseek-r1:7b` 推理模型生成回答，可回答语料文件中没有的问题。它与 `train_nn.py`、`train_qa.py` 的从零训练实验是两个入口。当前终端聊天未接入网页搜索，也未发布网站或打包桌面安装程序。
+这个入口默认使用本机 Ollama 和现成的 `qwen3:8b` 聊天模型生成回答，可回答语料文件中没有的问题。它与 `train_nn.py`、`train_qa.py` 的从零训练实验是两个入口。当前终端聊天未接入网页搜索，也未发布网站或打包桌面安装程序。
 
 ## 第一次准备
 
 1. 安装 [Ollama Windows 版](https://ollama.com/download/windows)。
-2. 在 PowerShell 运行 `ollama pull deepseek-r1:7b`，下载约 4.7GB 的本地模型。模型文件不要提交进 Git，许可详见[模型页面](https://ollama.com/library/deepseek-r1:7b)。本机已经安装，无需重复下载。
+2. 本机已安装 Qwen3 8B、Qwen3 4B 和 DeepSeek R1 7B，无需重复下载。用 `ollama list` 查看；模型文件不要提交进 Git。默认使用 Qwen3 8B，需对比推理模型时可在启动参数加 `--model deepseek-r1:7b`。
 3. 确认 Ollama 已启动，双击本目录的 `chat_local.cmd` 开始聊天。
 
 本机已选择把模型存放到 `D:\OpenAgentModels\ollama`，通过用户环境变量 `OLLAMA_MODELS` 配置。Ollama 云端功能由 `OLLAMA_NO_CLOUD=1` 关闭。模型下载和软件更新需要网络；本地推理调用的是 `127.0.0.1:11434`，不需要第三方云端模型密钥。

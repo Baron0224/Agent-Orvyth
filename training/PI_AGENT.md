@@ -1,6 +1,6 @@
 # Orvyth 聊天中的文件读取（Pi）
 
-已接入官方 `@earendil-works/pi-coding-agent` SDK 1.5.0，由 Python 后端启动独立 Node 进程。继续使用本机 Ollama。当前默认聊天为 `deepseek-r1:7b`，文件工具保留已验证的 `qwen3:8b`，可通过 `--tool-model` 独立指定；显式切换Qwen聊天时工具默认跟随该Qwen。R1在本机报告工具能力，但本次不以其替换既有Pi工具路径。
+已接入官方 `@earendil-works/pi-coding-agent` SDK 1.5.0，由 Python 后端启动独立 Node 进程。继续使用本机 Ollama。当前默认聊天为 `qwen3:8b`，文件工具保留已验证的 `qwen3:8b`，可通过 `--tool-model` 独立指定；显式切换Qwen聊天时工具默认跟随该Qwen。R1在本机报告工具能力，但本次不以其替换既有Pi工具路径。
 
 ## 使用
 

@@ -12,10 +12,10 @@
 
 更新这一版后，请先在旧的启动窗口按 Ctrl+C 停止服务，再重新运行命令。浏览器若显示旧页面，按 Ctrl+F5。启动后会自动打开 `http://127.0.0.1:8775/start` 粒子欢迎页。直接打开 `/` 仍可进入聊天。保持启动窗口开启；端口冲突可添加 `--port 8766` 或 `--port 8772`。
 
-默认聊天模型为 `deepseek-r1:7b`，Pi 文件工具继续使用已验证的 `qwen3:8b`。两者均为本机模型，沿用原数据库、记忆和设置，并非训练或合并权重。当前页面没有模型下拉框；切换时关闭原服务再运行：
+默认聊天模型为 `qwen3:8b`，Pi 文件工具继续使用已验证的 `qwen3:8b`。两者均为本机模型，沿用原数据库、记忆和设置，并非训练或合并权重。当前页面没有模型下拉框；切换时关闭原服务再运行：
 
 ```powershell
-& "D:\Codex\Orvyth\training\chat_web.cmd" --model qwen3:8b
+& "D:\Codex\Orvyth\training\chat_web.cmd" --model deepseek-r1:7b
 # 或使用较小的原模型
 & "D:\Codex\Orvyth\training\chat_web.cmd" --model qwen3:4b-instruct
 ```

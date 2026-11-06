@@ -1,0 +1,78 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>robot preview</title>
+<style>
+  body{margin:0;background:#fff;font:13px/1.4 system-ui;display:flex;flex-wrap:wrap;gap:6px;padding:6px}
+  figure{margin:0}
+  canvas{display:block;border:1px solid #ddd;width:300px;height:300px}
+  figcaption{color:#555;text-align:center;padding-top:2px}
+</style>
+<script type="module">
+import * as T from '/training/companion-preview/dog/3d/vendor/three.module.js';
+import {makeRobot, makeDog} from '/training/companion-preview/dog/3d/model.js';
+
+const views = [
+  ['robot front', makeRobot, 0],
+  ['robot 3/4', makeRobot, -0.55],
+  ['robot side', makeRobot, -1.45],
+  ['dog front', makeDog, 0],
+];
+
+for (const [label, make, turn] of views) {
+  const wrap = document.createElement('figure');
+  const stage = document.createElement('div');
+  const cap = document.createElement('figcaption');
+  cap.textContent = label;
+  wrap.append(stage, cap);
+  document.body.append(wrap);
+
+  const renderer = new T.WebGLRenderer({antialias: true, alpha: false, preserveDrawingBuffer: true});
+  renderer.setPixelRatio(2);
+  renderer.setSize(400, 400, false);
+  renderer.setClearColor('#ffffff');
+  renderer.outputColorSpace = T.SRGBColorSpace;
+  renderer.toneMapping = T.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = T.PCFSoftShadowMap;
+  stage.append(renderer.domElement);
+
+  const scene = new T.Scene();
+  const camera = new T.PerspectiveCamera(37, 1, .1, 50);
+  camera.position.set(0, 1.68, 3.9);
+  camera.lookAt(0, 1.68, 0);
+
+  scene.add(new T.HemisphereLight('#fff9f1', '#9c948b', 2.0));
+  const key = new T.DirectionalLight('#fff4e5', 2.5);
+  key.position.set(-3, 6, 5);
+  key.castShadow = true;
+  key.shadow.mapSize.set(1024, 1024);
+  key.shadow.radius = 4;
+  key.shadow.camera.left = -2; key.shadow.camera.right = 2;
+  key.shadow.camera.top = 4; key.shadow.camera.bottom = -1;
+  key.shadow.normalBias = .03; key.shadow.bias = -.0001;
+  scene.add(key);
+  const fill = new T.DirectionalLight('#e5edff', 1.4);
+  fill.position.set(4, 3, -3);
+  scene.add(fill);
+
+  const back = new T.Mesh(new T.PlaneGeometry(4, 4), new T.MeshStandardMaterial({color: '#a8998a', roughness: 1}));
+  back.position.set(0, 1.72, -.85);
+  scene.add(back);
+
+  renderer.localClippingEnabled = true;
+  const clip = new T.Plane(new T.Vector3(0, 1, 0), -1.10);
+  const rig = make();
+  rig.dog.position.z = .32;
+  rig.tailBones[0].parent.visible = false;
+  if (label.startsWith('robot')) { rig.dog.position.y = -.02; }
+  rig.dog.rotation.y = turn;
+  rig.dog.traverse(o => {
+    if (o.isMesh) for (const m of (Array.isArray(o.material) ? o.material : [o.material])) { m.clippingPlanes = [clip]; m.clipShadows = true; }
+  });
+  scene.add(rig.dog);
+  renderer.render(scene, camera);
+  document.body.dataset.done = (document.body.dataset.done || 0);
+}
+document.body.dataset.done = '1';
+</script>
