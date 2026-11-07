@@ -6,6 +6,8 @@ class QualityTest(unittest.TestCase):
         text = '开心😊。\n```python\nprint("😊")\n```\nhttps://example.org/😊'
         self.assertEqual(without_emoji(text),'开心。\n```python\nprint("😊")\n```\nhttps://example.org/😊')
         self.assertEqual(addressed('爸爸，你好😊','爸爸'),'爸爸，你好')
+    def test_keycaps_and_sequences_preserve_code_url_numbers(self):
+        self.assertEqual(without_emoji('1️⃣ 2⃣ 👩‍💻 123 1.2 `1️⃣` https://x.test/1️⃣'),'   123 1.2 `1️⃣` https://x.test/1️⃣')
     def test_only_proven_wrong_assistant_vocative_is_quarantined(self):
         history = [{'role':'user','content':'我上了一天课'}, {'role':'assistant','content':'爸爸，小白你好呀！'}, {'role':'assistant','content':'我叫小白，先运行print(1)。'}]
         clean = trusted_history(history,'小白','爸爸')

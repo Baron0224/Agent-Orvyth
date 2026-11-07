@@ -29,9 +29,13 @@ class ProseStream:
                 if any(prefix.startswith(s) for prefix in ('https://','http://')) and not final:break
                 prefix=next((p for p in ('https://','http://') if s.startswith(p)),None)
                 if prefix:out.append(prefix);self.pending=s[len(prefix):];self.mode='url';continue
+            if self.mode=='prose' and s[0] in '0123456789#*':
+                if not final and (len(s)==1 or (len(s)==2 and s[1]=='\ufe0f')):break
+                keycap=re.match(r'^[0-9#*]\ufe0f?\u20e3',s)
+                if keycap:self.pending=s[keycap.end():];continue
             c=s[0];self.pending=s[1:]
             n=ord(c)
-            if self.mode=='prose' and (0x1F1E6<=n<=0x1FAFF or 0x2600<=n<=0x27BF or n in (0xFE0F,0x200D)):continue
+            if self.mode=='prose' and (0x1F1E6<=n<=0x1FAFF or 0x2600<=n<=0x27BF or n in (0xFE0E,0xFE0F,0x200D,0x20E3) or 0xE0020<=n<=0xE007F):continue
             out.append(c)
         return ''.join(out)
 

@@ -14,6 +14,10 @@ class StreamTests(unittest.TestCase):
         for char in raw:out+=address.feed(prose.feed(char))
         out+=address.feed(prose.feed('',final=True));out+=address.feed('',final=True)
         self.assertEqual(out,'爸爸，中文。\n```python\nprint("😊")\n```\n`😊` https://x.test/😊')
+    def test_keycaps_one_character_at_a_time(self):
+        stream=ProseStream();raw='1️⃣2⃣👩‍💻123 1.2 `1️⃣` https://x.test/1️⃣'
+        out=''.join(stream.feed(c) for c in raw)+stream.feed('',final=True)
+        self.assertEqual(out,'123 1.2 `1️⃣` https://x.test/1️⃣')
     def test_header_guard_delays_wrong_role_and_legacy_reasoning(self):
         for text in ('爸','爸爸，','爸爸，小白','爸爸，小白你好呀！','<thi','<think>secret'):
             self.assertFalse(head_ready(text,'小白','爸爸'))
