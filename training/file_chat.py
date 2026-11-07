@@ -4,8 +4,12 @@ import re
 from file_lookup import find_matches, query_name
 from file_write import write_request
 from word_write import word_request
+from project_lookup import locate_project
 
 ASK_PATH = '我在本机常用文档和项目目录里暂时没定位到对应文件。告诉我更具体的文件名，或者把文件所在文件夹发给我，我再接着找。'
+PROJECT_LOCATION = '这是你自己的项目资料，对吗？先告诉我它在本地文件夹还是网站里，再给我对应路径或链接，我就按那个范围找，不把项目名当影视作品去猜。'
+PROJECT_LOCAL = '把本地文件夹的完整路径发给我，我只在你指定的范围里找。'
+PROJECT_WEB = '把网站链接发给我就好，我只查这个范围。'
 
 def local_intent(question):
     return bool(re.search(r'调取|读取|读一下', question) or
@@ -19,13 +23,25 @@ def natural_location(question):
     rest=re.sub(r'[/\\]|下面的|下的|的', lambda _: '\\', rest).strip(' \\"“”')
     return match[1].upper()+':\\'+rest if rest else None
 
-def file_request(question, history):
+def file_request(question, history, context=None):
+    located=locate_project(question,history,context)
+    if located:return located
+    path_given=bool(re.search(r'[A-Za-z]:[\\/]|https?://',question))
+    awaiting_location=bool(history and history[-1].get('role')=='assistant' and any(s in history[-1].get('content','') for s in (PROJECT_LOCATION,PROJECT_LOCAL,PROJECT_WEB)))
+    if awaiting_location and re.search(r'算了|先不|不看了|换个话题',question):return None
+    if not path_given and ((re.search(r'我.{0,100}(图纸|demo|原型|项目资料)',question,re.I) and re.search(r'查|找|看|读|调取',question)) or awaiting_location):
+        if awaiting_location and re.search(r'网站|网页|网上',question):return {'reply':PROJECT_WEB}
+        if awaiting_location and re.search(r'本地|电脑|文件夹',question):return {'reply':PROJECT_LOCAL}
+        return {'reply':PROJECT_LOCATION}
+    if awaiting_location and re.search(r'https?://',question):return None
     word = word_request(question)
     if word: return word
     creation=write_request(question)
     if creation: return creation
     original_question = question
     source_question = None
+    if awaiting_location:
+        source_question=next((x['content'] for x in reversed(history[-8:]) if x.get('role')=='user' and re.search(r'图纸|demo|原型|项目资料',x.get('content',''),re.I)),None)
     location=natural_location(question)
     if location:
         for entry in reversed(history[-8:]):
@@ -36,7 +52,7 @@ def file_request(question, history):
                    (history[-1].get('content') == ASK_PATH or history[-1].get('content','').startswith('我没找到这个文件或文件夹。')))
     choices = history[-1].get('content','') if history and history[-1].get('role')=='assistant' else ''
     choosing = choices.startswith('找到几个可能的文件或项目')
-    pending = pending or bool(source_question)
+    pending = pending or bool(source_question) or awaiting_location
     if choosing:
         selection = re.fullmatch(r'(?:第)?([1-8一二三四五六七八])(?:个|项)?',question.strip())
         candidates = re.findall(r'`([^`]+)`',choices)

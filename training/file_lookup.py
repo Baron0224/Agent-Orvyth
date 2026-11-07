@@ -30,19 +30,25 @@ def search_roots():
         candidates.extend(cloud/name for name in ('Documents','文档','เอกสาร','Desktop','桌面'))
     return [p for p in candidates if p.is_dir()]
 
-def find_matches(name, roots=None, seconds=3, limit=30000):
+def find_matches(name, roots=None, seconds=3, limit=30000, details=False):
     key = normalize(name)
-    if len(key)<3: return []
+    if len(key)<3: return {'paths':[],'status':'invalid','roots':[]} if details else []
     roots = search_roots() if roots is None else roots
     queue = deque((Path(p), 0) for p in roots)
-    seen=set(); matches=[]; visited=0; deadline=time.monotonic()+seconds
+    seen=set(); matches=[]; visited=0; denied=0; opened=0; capped=False; deadline=time.monotonic()+seconds
+    def result():
+        paths=sorted(set(matches),key=str)
+        if not details:return paths
+        return {'paths':paths,'roots':[str(p) for p in roots],'status':'limited' if capped or queue or denied or not opened or visited>=limit or time.monotonic()>=deadline else 'searched','denied':denied,'opened':opened,'visited':visited}
     while queue and visited<limit and time.monotonic()<deadline:
         folder,depth=queue.popleft()
         try:
+            if folder.name.casefold() in SKIP or folder.is_symlink() or (hasattr(folder,'is_junction') and folder.is_junction()):continue
             canonical=str(folder.resolve()).casefold()
             if canonical in seen: continue
             seen.add(canonical)
             with os.scandir(folder) as entries:
+                opened+=1
                 for entry in entries:
                     visited+=1
                     if visited>=limit or time.monotonic()>=deadline: break
@@ -52,9 +58,12 @@ def find_matches(name, roots=None, seconds=3, limit=30000):
                     is_dir=entry.is_dir(follow_symlinks=False)
                     if key in normalize(target.stem if not is_dir else target.name):
                         matches.append(target.resolve())
-                        if len(matches)>=8: return sorted(set(matches),key=str)
+                        if len(matches)>=8:
+                            capped=True;return result()
                         # The project itself is enough; let Pi inspect its contents.
                         continue
                     if is_dir and depth<6: queue.append((target,depth+1))
-        except OSError: continue
-    return sorted(set(matches),key=str)
+                    elif is_dir:capped=True
+        except OSError:
+            denied+=1;continue
+    return result()

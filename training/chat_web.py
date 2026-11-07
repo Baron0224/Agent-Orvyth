@@ -22,6 +22,9 @@ from file_write import create_text_file
 from word_write import create_word_file
 from hermes_memory import HermesMemory
 from task_trace import TaskTrace
+from runtime_capabilities import assessment, is_self_assessment
+from file_preview import cards, preview
+from urllib.parse import urlsplit,parse_qs
 from chat_stream import AddressStream
 from chat_preferences import addressed, prompt as preference_prompt
 from live_news import is_news_request, requested_day, login_next_step, evidence_answer, result_clarification, translate_saved_titles
@@ -66,6 +69,21 @@ class ChatServer(ThreadingHTTPServer):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         with opener.open("http://127.0.0.1:11434/api/tags", timeout=3) as response:
             return json.load(response).get("models", [])
+
+    def runtime_status(self, owner=None):
+        model=self.selected_model(owner) if owner else self.model
+        try:
+            names={item.get('name') for item in self.installed_models()}
+            ready=model in names
+            return {'ready':ready,'model':model,'default_model':self.model,'tool_model':self.tool_model,'available_models':[name for name in AVAILABLE_MODELS if name in names],'message':'可以聊天' if ready else '所选模型尚未安装，请在设置中选择已安装模型。'}
+        except (OSError,ValueError,urllib.error.URLError):
+            return {'ready':False,'model':model,'tool_model':self.tool_model,'available_models':[],'message':'请先打开 Ollama，再点检查连接。'}
+
+    def capability_snapshot(self, owner):
+        status=self.runtime_status(owner)
+        # 描述引用正在使用的处理函数；不复制一份“健康正常”的工具清单。
+        entries=((lookup,'网页资料搜索'),(current_weather,'城市天气'),(file_request,'有范围的个人文件定位'),(self.memory.command,'显式账户记忆'),(self.store.reminder_chat,'待办提醒'))
+        return {'status':status,'registered':[label for handler,label in entries if callable(handler)],'pi_ready':pi_available() and self.tool_model in status.get('available_models',[])}
 
     def chat_lock(self, chat):
         with self.locks_guard:
@@ -112,6 +130,18 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.valid_host():
             return
+        if urlsplit(self.path).path=='/api/file-preview':
+            try:
+                _,owner=self.owner()
+                if not owner:raise ValueError('请先载入本机账户。')
+                params=parse_qs(urlsplit(self.path).query)
+                chat=params['chat'][0];message=int(params['message'][0]);index=int(params['index'][0])
+                _,evidence=self.server.store.candidate_record(owner,chat,message)
+                if evidence.get('kind')!='file_lookup' or not 0<=index<min(8,len(evidence.get('paths',[]))):raise ValueError('不是已授权的候选。')
+                body=preview(evidence['paths'][index],evidence)
+                self.headers_for(200,'image/png');self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
+            except (ValueError,KeyError,IndexError,OSError,MissingRecord):self.json_response(403,{'error':'无法预览：候选未授权、已变化、类型不支持或图片过大。'})
+            return
         if self.path == "/api/session":
             token, owner = self.owner(create=True)
             self.json_response(200, self.server.state(owner), token)
@@ -120,19 +150,15 @@ class Handler(BaseHTTPRequestHandler):
             self.json_response(200, {"installed": pi_available(), "model": self.server.tool_model})
             return
         if self.path == "/api/status":
-            try:
-                models = self.server.installed_models()
-                _, owner = self.owner()
-                model = self.server.selected_model(owner) if owner else self.server.model
-                ready = any(item.get("name") == model for item in models)
-                self.json_response(200, {"ready": ready, "model": model, "default_model": self.server.model, "tool_model": self.server.tool_model, "available_models": [name for name in AVAILABLE_MODELS if any(item.get('name') == name for item in models)], "message": "可以聊天" if ready else "所选模型尚未安装，请在设置中选择已安装模型。"})
-            except (OSError, ValueError, urllib.error.URLError):
-                self.json_response(200, {"ready": False, "message": "请先打开 Ollama，再点检查连接。"})
+            _, owner = self.owner()
+            self.json_response(200,self.server.runtime_status(owner))
             return
         assets = {"/particle-field.js": ("particle-field.js", "text/javascript"), "/assets/particle-ribbon.png": ("assets/particle-ribbon.png", "image/png"), "/": ("index.html", "text/html"), "/start": ("start.html", "text/html"), "/start.css": ("start.css", "text/css"), "/start.js": ("start.js", "text/javascript"), "/app.js": ("app.js", "text/javascript"), "/styles.css": ("styles.css", "text/css")}
         companion_files = {
             "/task-progress.js": ASSETS / "task-progress.js",
             "/typewriter.js": ASSETS / "typewriter.js",
+            "/answer-view.js": ASSETS / "answer-view.js",
+            "/appearance.js": ASSETS / "appearance.js",
             "/reminder-notifications.js": ASSETS / "reminder-notifications.js",
             "/pet3d.js": ASSETS / "pet3d.js",
             "/companion3d/model.js": ASSETS.parent / "companion-preview" / "dog" / "3d" / "model.js",
@@ -262,7 +288,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.server.memory.is_command(question):
             self.stream_file_chat(owner, chat, question, {'memory': question})
             return
-        file_plan = file_request(question, history)
+        file_plan = file_request(question, history, self.server.store.latest_search_evidence(owner,chat))
         if file_plan:
             self.stream_file_chat(owner, chat, question, file_plan)
             return
@@ -298,6 +324,8 @@ class Handler(BaseHTTPRequestHandler):
         model_answer = role_info(question, pet_name, profile.get('user_address', '')) or model_info(question, selected_model, pet_name)
         if guard is not None or clarification is not None:
             pass
+        elif is_self_assessment(question):
+            direct=assessment(self.server.capability_snapshot(owner))
         elif model_answer is not None:
             direct = model_answer
         elif re.fullmatch(r'(今天|现在)(是)?(几月几[号日]|几号|几[年月日号几]+|什么日期|日期|星期几|周几)', normalized):
@@ -381,7 +409,8 @@ class Handler(BaseHTTPRequestHandler):
                     emit({'type':'done','chat_id':chat})
                     return
                 local.system_prompt = local.system_prompt.replace('当前没有联网搜索工具，不能声称刚查过网页，不能保证实时信息准确。', '')
-                local.system_prompt += source_context(source, bool(re.search(r'链接|出处|来源|网址',question)))
+                remaining=max(500,5500-len(local.system_prompt.encode('utf8'))-len(question.encode('utf8')))
+                local.system_prompt += source_context(source, bool(re.search(r'链接|出处|来源|网址',question)),byte_budget=min(1800,remaining))
             elif re.search(r'不要.{0,5}(联网|上网|搜索)|别.{0,3}(联网|上网|搜索)|离线',question):
                 local.system_prompt += '\n用户禁止联网，本轮没有搜索；不要声称查过，实时信息只能说明未核实。'
             if selected_model.startswith("deepseek-r1"):
@@ -407,6 +436,8 @@ class Handler(BaseHTTPRequestHandler):
                 stream.close()
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
+        except (OSError,ValueError,TypeError,RuntimeError):
+            emit({'type':'error','message':'这次处理资料时出错，回答没有完成或保存。可以缩小问题范围再试。'})
         finally:
             self.server.generation_lock.release()
 
@@ -426,8 +457,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.flush()
             if 'memory' in plan or 'reply' in plan:
                 answer=self.server.memory.command(owner,plan['memory']) if 'memory' in plan else plan['reply']
-                answer=self.server.store.save_pair(owner,chat,question,answer)
+                answer=self.server.store.save_pair(owner,chat,question,answer,search_evidence=plan.get('file_lookup'))
                 emit({'type':'delta','content':answer})
+                if plan.get('file_lookup'):
+                    message,evidence=self.server.store.candidate_record(owner,chat)
+                    emit({'type':'files','items':cards(chat,message,evidence)})
             else:
                 trace=TaskTrace(emit)
                 if 'word_write' in plan:

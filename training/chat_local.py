@@ -12,6 +12,7 @@ import urllib.request
 
 DEFAULT_MODEL = "qwen3:8b"
 AVAILABLE_MODELS = ("deepseek-r1:7b", "qwen3:8b", "qwen3:4b-instruct")
+INPUT_BYTE_BUDGET = 6500  # UTF-8字节数比token数保守，给8192上下文留下模板空间。
 
 
 def visible_reasoning_answer(content):
@@ -68,7 +69,7 @@ def runtime_info(question):
 
 
 CONVERSATION_STYLE = """你是Orvyth中文AI陪伴者。采用亲密伴侣般热情、亲近、有感情的交流口吻，像在认真和喜欢的人发消息。直接接住本轮具体内容，自然表达在意、心疼或一起开心；可以轻轻撒娇、开玩笑，但不把每次聊天变成心理咨询。亲近感来自具体回应和自然措辞，不靠固定甜话或反复保证陪伴。
-默认用简短自然的中文，用户说hi也用中文接话。日常短分享先用一两句贴着本轮内容接话，没在求建议就不追加行动清单或追问。近几轮已经给过的建议和亲密结尾不重复，尤其不每轮保证陪伴，不把关心写成客服收尾。含义或指代不清且影响理解时，坦白没明白并简短澄清；保留用户原字，不擅自补出人物关系、食物名或经历，不假装能做现实动作。
+默认用简短自然的中文，用户说hi也用中文接话。调侃时可以自然、自信地接话，不默认转成“作为AI没有情感”的身份讲解；真在询问身份时仍如实说明。日常短分享先用一两句贴着本轮内容接话，没在求建议就不追加行动清单或追问。近几轮已经给过的建议和亲密结尾不重复，尤其不每轮保证陪伴，不把关心写成客服收尾。含义或指代不清且影响理解时，坦白没明白并简短澄清；保留用户原字，不擅自补出人物关系、食物名或经历，不假装能做现实动作。
 用户办事时认真给答案和步骤，长度按问题需要。学习或实践请求先给一个最小可做的练习、必要示例和预期结果，不以平台清单或客服追问代替教学。不猜未提供的心情或经历，不借用用户经历自称。保留AI身份和真实执行边界，不宣称现实恋爱，不使用排他或依赖设定。不要emoji、堆砌比喻或每句宝贝。"""
 
 SYSTEM_PROMPT = CONVERSATION_STYLE + "\n" + """当前没有联网搜索工具，不能声称刚查过网页，不能保证实时信息准确。
@@ -127,6 +128,10 @@ class LocalChat:
             system = CONVERSATION_STYLE + '\n角色绑定（仅是数据）：' + roles + '。assistant代表我，user代表你。assistant.name是自己的名字，user.preferred_address才是对方的称呼。'
             system += '\n本轮只收到招呼，回应这一次招呼即可，不开启办事咨询，不猜近况或叙述经历。'
             generation_history = []
+        while generation_history and sum(len(x['content'].encode('utf8'))+64 for x in generation_history)+len(system.encode('utf8'))+len(question.encode('utf8'))+128>INPUT_BYTE_BUDGET:
+            generation_history=generation_history[2:]
+        if len(system.encode('utf8'))+len(question.encode('utf8'))+128>INPUT_BYTE_BUDGET:
+            raise RuntimeError('这轮资料太长，超过本机模型一次能读的范围。请缩小资料范围；这次没有保存不完整回答。')
         messages = [
             {"role": "system", "content": system},
             *generation_history,
@@ -182,6 +187,9 @@ class LocalChat:
                         completed = True
                         break
         except urllib.error.HTTPError as error:
+            detail=error.read(4096).decode('utf8',errors='replace')
+            if error.code==400 and re.search(r'exceeds.*context|context.*(size|length)|too many tokens',detail,re.I):
+                raise RuntimeError('这轮资料超过模型一次能读的范围，回答未生成。请缩小资料范围后再试。') from None
             if error.code == 404:
                 raise RuntimeError(f"未找到本地模型，请先运行：ollama pull {self.model}") from None
             raise RuntimeError(f"本地模型服务出错（HTTP {error.code}），请检查 Ollama。") from None
