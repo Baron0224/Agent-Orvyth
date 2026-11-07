@@ -114,6 +114,8 @@ function addMessage(role, text = '', complete = true) {
   name.textContent = role === 'user' ? (state?.profile.name === '我的空间' ? '你' : state?.profile.name || '你') : 'Orvyth';
   label.append(avatar, name);
   const body = document.createElement('div'); body.className = 'body'; body.textContent = role === 'assistant' ? formatAssistantText(text) : text;
+  body.rawText=text;
+  if(role==='assistant'&&complete)window.OrvythAnswerView.render(body,text);
   entry.append(label, body);
   let copy = null;
   if (role === 'assistant') {
@@ -121,7 +123,7 @@ function addMessage(role, text = '', complete = true) {
     copy.textContent = '复制'; copy.setAttribute('aria-label', '复制这条回答'); copy.hidden = !complete || !text;
     copy.addEventListener('click', async () => {
       try {
-        await navigator.clipboard.writeText(body.textContent);
+        await navigator.clipboard.writeText(body.rawText ?? body.textContent);
         copy.textContent = '已复制'; copy.setAttribute('aria-label', '回答已复制');
         clearTimeout(copy.resetTimer);
         copy.resetTimer = setTimeout(() => { copy.textContent = '复制'; copy.setAttribute('aria-label', '复制这条回答'); }, 1800);
@@ -193,7 +195,7 @@ function applyState(data, full = false) {
   renderProfile(); renderHistory(); renderTasks();
   if (full) {
     messages.replaceChildren(); $('#welcome').hidden = false;
-    for (const message of data.messages) { const item=addMessage(message.role, message.content); if(message.task_trace) window.OrvythTaskProgress.render(item.entry,message.task_trace); }
+    for (const message of data.messages) { const item=addMessage(message.role, message.content); if(message.task_trace) window.OrvythTaskProgress.render(item.entry,message.task_trace); if(message.file_results)window.OrvythAnswerView.files(item.entry,message.file_results); }
     follow(true);
   }
   controls();
@@ -233,6 +235,7 @@ function interactPet() {
 function stopReply(showNotice=true) {
   const run=currentReply;if(!run)return;
   currentReply=null;run.controller.abort();run.writer.cancel();
+  window.OrvythAnswerView.render(run.answer.body,run.writer.text);
   run.answer.entry.classList.remove('pending');run.answer.entry.classList.add('stopped');
   busy=false;resize();
   if(showNotice)setNotice(run.networkDone?'已停止显示，完整已生成回答仍保留在聊天记录中。':'已停止当前回复；中断前的文字可能未完整保存。');
@@ -252,7 +255,7 @@ async function submit(text) {
   run.writer=window.OrvythTypewriter.create({render:visible=>{
     if(currentReply!==run || activeChat!==conversation)return;
     const nearBottom=area.scrollHeight-area.scrollTop-area.clientHeight<180;
-    answer.entry.classList.remove('pending');answer.body.textContent=formatAssistantText(visible);follow(nearBottom);
+    answer.entry.classList.remove('pending');answer.body.rawText=visible;answer.body.textContent=visible;follow(nearBottom);
   }});
   currentReply=run;controls();
   try {
@@ -264,6 +267,7 @@ async function submit(text) {
       if (!line.trim()) return; const event = JSON.parse(line);
       if (event.type === 'error') throw new Error(event.message);
       if (event.type === 'task') { taskActive=event.task.state==='running'; window.OrvythTaskProgress.render(answer.entry,event.task); }
+      if (event.type === 'files') window.OrvythAnswerView.files(answer.entry,event.items);
       if (event.type === 'done') {done = true;run.networkDone=true;}
       if (event.type === 'status' && !output) answer.body.textContent = event.message;
       if (event.type === 'tool' && !output) answer.body.textContent = (event.name === 'list_project' ? '正在查看目录：' : '正在读取：') + event.path;
@@ -282,6 +286,7 @@ async function submit(text) {
       if (!done || !output) throw new Error('回复中断，请稍后重试。');
       await run.writer.finish();
       if(currentReply!==run)return;
+      window.OrvythAnswerView.render(answer.body,output);
       answer.copy.hidden = false;
     } finally { await reader.cancel().catch(() => {}); }
     try { const next=await requestJSON('/api/session'); if(currentReply!==run || activeChat!==conversation)return; applyState(next); } catch { if(currentReply===run)setNotice('回答已收到，列表暂时未刷新。'); }
@@ -291,7 +296,7 @@ async function submit(text) {
     run.writer.cancel();
     if(currentReply!==run)return;
     if(taskActive) window.OrvythTaskProgress.render(answer.entry,{state:'failed',steps:[{label:'连接中断，任务结果尚未确认。请检查文件后再重试。'}]});
-    answer.entry.classList.remove('pending'); answer.entry.classList.add('failed'); answer.body.textContent = run.writer.text || '这次没能收到回答。';
+    answer.entry.classList.remove('pending'); answer.entry.classList.add('failed'); answer.body.textContent = run.writer.text || error.message || '这次没能收到回答。';
     setNotice(error.message || '服务暂时无法连接，请重试。'); input.value = text; setPet('idle', '这次连接没跟上，我们可以再试一次。');
   } finally { if(currentReply===run){currentReply=null;busy=false;resize();} }
 }

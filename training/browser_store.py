@@ -12,6 +12,7 @@ import sqlite3
 import time
 import uuid
 from datetime import datetime, date, timedelta
+from file_preview import cards
 
 
 def local_now():
@@ -122,8 +123,9 @@ class Store:
                         item["remind_due"] = not item["done"] and not item["waiting"] and today >= item["start_date"] and now.strftime("%H:%M") >= item["remind_time"]
                 tasks.append(item)
             messages = []
-            for row in db.execute("SELECT role,content,task_trace FROM messages WHERE chat=? ORDER BY id", (profile["active_chat"],)):
+            for row in db.execute("SELECT id,role,content,task_trace,search_evidence FROM messages WHERE chat=? ORDER BY id", (profile["active_chat"],)):
                 item={'role':row['role'],'content':row['content']}
+                if row['search_evidence']:item['file_results']=cards(profile['active_chat'],row['id'],json.loads(row['search_evidence']))
                 if row['task_trace']: item['task_trace']=json.loads(row['task_trace'])
                 messages.append(item)
             return {"profile": {**DEFAULTS, **{k: v for k, v in json.loads(profile["profile"]).items() if k not in RETIRED}}, "chats": chats, "tasks": tasks,
@@ -141,6 +143,13 @@ class Store:
             self.require_chat(db, owner, chat)
             row = db.execute("SELECT search_evidence FROM messages WHERE chat=? AND role='assistant' ORDER BY id DESC LIMIT 1", (chat,)).fetchone()
             return json.loads(row[0]) if row and row[0] else None
+
+    def candidate_record(self,owner,chat,message=None):
+        with self.connect() as db:
+            self.require_chat(db,owner,chat)
+            row=db.execute("SELECT id,search_evidence FROM messages WHERE chat=? AND role='assistant'"+(' AND id=?' if message is not None else '')+' ORDER BY id DESC LIMIT 1',(chat,message) if message is not None else (chat,)).fetchone()
+            if not row or not row['search_evidence']:raise ValueError('没有授权的候选记录。')
+            return row['id'],json.loads(row['search_evidence'])
 
     def chat_action(self, owner, action, chat=None, title=None):
         with self.connect() as db:

@@ -285,3 +285,80 @@
 - 真实游戏验收：三角洲推荐什么图→询问模式→烽火地带（未带“模式”二字）实际进入Tavily搜索并保存web来源；来源包含《三角洲行动》烽火地带地图粗解之——零号大坝（普通）（一）、地图工具及第三方工具站。未验证当前版本官方地图清单，不将原文旧版本片段当成可靠选图建议；对没有地图正文的片段改为明确无可用选图片段。地图纠错不会再返回新闻来源范围提示。没有声称游戏推荐已经全部可靠。
 - 状态：已改本地，20项检查及git diff --check通过（学习日志有既存LF/CRLF提示）。批量重启命令第一次被自动审批策略拦截，工具仅给blocked by policy；改为核实本仓库8775的两个既有Python子进程后单独停止并隐藏启动成功。最终/api/status为ready=true，聊天和工具继续qwen3:8b；最终8775独立会话已核对缺城市、菜式补充及地图纠错均done。已重启生效；未提交、未推送GitHub、未上线。没有实测证明每一次普通模型回答都能稳定达到伴侣感，当前只是保留已有风格并改善这些固定回复。
 - 行号校正（只追加）：本条“我能改”中的菜式answer实际位于`training/web_lookup.py:57`，城市询问answer实际位于`training/weather_tool.py:33`；前面的58/34为偏移一行，内容与行为不变。
+
+## [2026-11-07] 修复超出模型阅读上限的空回答，并澄清个人项目与多名称排行
+- 改了：`training/chat_local.py:15、72、131-136、189-196` —— 请求本机模型；仅限制旧历史字符 → 对整个输入使用6500 UTF-8字节的保守预算、仅减少送入模型的旧历史，不改数据库旧消息；保留本轮问题/系统身份约束，过大则明确拒绝；上下文HTTP400安全映射为中文原因。调侃时不默认转成没有情感的身份套话，没有固定写死调侃答案。
+- 改了：`training/web_lookup.py:51-57、105-107、315-354` —— 分流搜索并整理证据；重复extract/items/pages全量注入 → 有限预算下保留资料片段，完整来源仍在原有来源记录；自评类问题没有外部主题时不误搜网页；多个英文名称排行先确认拼写/产品版本和比较维度，不拆出不存在的平台或编榜单。
+- 改了：`training/file_chat.py:9-11、25-64` —— 识别个人文件请求；个人图纸/demo可能落入影视知识生成 → 先确认本地/网站并索要路径/链接；称呼前缀不影响接续，补本地/网站后分别问具体位置，不扫描未指定目录。已有路径仍按原有文件工具权限处理。
+- 改了：`training/chat_web.py:384-412` —— 网页回答入口；新增资料预算和资料处理异常的失败事件，失败不保存成功回答。`training/browser/app.js:294` —— 错误显示；笼统没收到回答 → 优先显示安全的后端错误原因，不回显私密prompt或原始服务错误body。
+- 改了：`training/test_reply_limits.py:9-55` —— 覆盖资料裁剪、历史不因预算被改写、HTTP400原因/无历史写入、个人项目无扫描、带称呼位置接续、排行澄清、自评不搜索及HTTP错误结束。
+- 因为：真实用户三次自评请求空白。本轮先用当前8775复现status查资料→status R1思考→error HTTP400；直接捕获本机Ollama错误body为request (9322 tokens) exceeds the available context size (8192 tokens)。不是本次思考耗尽或前端漏消费。网页重复片段/正文与系统历史使输入超限；浏览器正文当时仅显示笼统失败。没有换模型/不断增大ctx/无限重试，不以固定答案掩盖。
+- 我能改：`training/chat_local.py:15`的INPUT_BYTE_BUDGET；`training/web_lookup.py:315`的byte_budget；`training/file_chat.py:9-11`的位置询问文字。
+- 工具：PowerShell——核查实际进程、API状态和仅重启已核实的8775子进程；Python HTTP——复现Ollama错误、隔离测试会话与实际网页接口；unittest——31项检查通过（reply_limits4、local_models7、daily4、auto_search7、stream6及原模块实际收集数以运行31为准）；Node --check——网页脚本语法通过。无新插件/付费服务，可手动替代。
+- 一句话总结：让资料太多时不再只剩空白，并先弄清用户要找什么，再去回答。
+- 实测区分：一次精简资料后强制向自评附加搜索结果的R1调用返回正文并保存，证明不再400，但内容跑到维他命B12，属于答非所问，不能算语义通过。因此正常自评路由不再搜索无关网页。最终当前8775真实HTTP正常路由自评只出现思考status（无搜索status）、返回非空delta并done，带BOOS称呼，不再体检话题；然而仍泛泛自称“已按照规定调整”，没有执行依据，也偏客套，不能宣称自评准确或伴侣感稳定。
+- 真实HTTP项目/排行：新隔离账户设置BOOS；个人three feet under图纸demo→询问本地/网站；本地→索要完整文件夹路径；网站→索要链接，均带BOOS并done，无影视/视频平台建议，没有扫描目录。多名称排行原样列出deepseekharness/chatgpt/muse/Claude/grokbot并问名称版本与编程/聊天/搜索/价格维度，没有生成平台或排名。实际读取具体用户路径/网页内容未验证；测试验证链接跳出本地分支，真实最终HTTP本轮只验证位置问答。
+- 状态：已改本地、已重启生效；当前聊天模型保持用户本轮已在用的deepseek-r1:7b，工具保持qwen3:8b，没有换模型、改称呼/宠物/账户数据。保留现有R1不泄露思考/不完整回答不存储和Qwen逐字流式协议；未在浏览器重新视觉验收错误文字，但语法和后端事件检查通过。未提交、未推送GitHub、未上线。风格和开放式自评仍未完全达标，不报全部修好。
+- 行号补充（只追加）：资料整理函数当前完整范围为`training/web_lookup.py:315-342`，前述315-354包含了文件结尾以外的行号，应以此范围为准；本轮共31项自动检查通过，不依赖前述分模块估计数。
+
+## [2026-11-07] 修复个人项目查找反复询问位置的死循环
+- 改了：`training/project_lookup.py:8-79` —— 按项目名定位个人资料；固定PROJECT_LOCATION反复询问 → 已明确文件夹的首条请求先使用原有允许目录按项目名查找，再只在候选项目内查图纸/demo；“对/对是我的资料/我找不到了你帮我找啊”接续当前结果。完整名称未命中时，可按组合描述中的英文名称片段返回近似候选，明确未确认，不冒充精确命中。
+- 改了：`training/file_lookup.py:33-69` —— 有范围/数量/时间/深度限制的只读名称搜索；只有列表 → 可选返回searched/limited、访问失败数和实际范围。继续跳过原有敏感/隐藏目录、符号链接和junction，不跟随链接，不读取文件内容，不写删目标文件；没有放宽默认根目录。
+- 改了：`training/file_chat.py:26-28`及`training/chat_web.py:265、432` —— 普通聊天接文件请求；先被重复询问拦截 → 先走查找，并将file_lookup状态放入当前账户当前聊天已有来源记录。仍使用Store的账户/聊天权限校验；旧历史带BOOS称呼的PROJECT_LOCATION也能接续。没有本轮状态的其他聊天或账户不能拿到路径。
+- 改了：`training/test_project_lookup.py:1-64`及`training/test_reply_limits.py:32-50` —— 真正临时目录/文件和HTTP验证；覆盖首条→对→对是我的资料→找不到、有/无称呼、目录和文件、完整/近似命中、不命中、范围受限、旧位置提示接续、后续指定范围以及账户和聊天隔离。修正上轮测试误要求“本地”后必须继续索要完整路径的错误预期；同时新增无项目名的“我的图纸demo”不得把其他demo项目当目标的回归，并非只改预期掩盖问题。
+- 因为：上轮我新增的PROJECT_LOCATION在已有find_matches之前抢走请求，首条已说文件夹仍问本地/网站，确认短句又被相同常量拦住。用户找不到路径时要求先提供路径不能解决任务，因此恢复已有授权常用目录/ORVYTH_FILE_ROOTS内的只读搜索；没有静默全盘扫描，也不改Pi读取/修改范围和权限。
+- 我能改：`training/file_lookup.py:33`的seconds/limit控制单次预算；`training/file_lookup.py:19-30`的search_roots和ORVYTH_FILE_ROOTS控制已有搜索范围；`training/project_lookup.py:57-70`的候选匹配规则。项目名不使用白名单。
+- 工具：PowerShell——读取代码、检查真实项目目录名称/核实8775进程并重启；Python unittest——19项定向检查通过，新增3项测试覆盖真实临时目录及HTTP连续对话；随后修正测试替身缺少close的错误，仅重跑新增3项均通过且无后台异常；HTTP——最终8775实际连续四条验收。均可手动替代，无新插件/付费服务/模型。
+- 一句话总结：用户说文件找不到时，在允许的范围里真正查名称，而不是反复要求用户先找到路径。
+- 实际最终HTTP：新隔离测试账户设置BOOS；“帮我找我的three feet under的文件夹中的图纸demo”→“对”→“对是我的资料”→“我找不到了你帮我找啊”均返回delta+done，四轮都给出`D:\Codex\three feet under\Three-Feet-Under-main\新手教程墓道大致图demo.png`。第一轮说明不是完整名称“图纸demo”，仅近似候选；后续保留候选路径，不再要求本地还是网站或先提供完整路径。没有调用知识搜索/模型猜影视，也没有读取该图片内容，因此图片内容及是否确为用户目标未验证。
+- 实际搜索限制：默认范围含常用Documents/Desktop、当前仓库/父目录及已存在的Codex/Projects/OneDrive常用目录。本次实际搜索报告达到限制或部分目录不可访问，结果不保证完整；已定位`D:\Codex\three feet under`，只列其一层及子项目一层名称确认候选文件存在，没有读取其他私人文件内容。没有把未找到等同于文件不存在。
+- 已修正的另一风险：仅“我的图纸demo”无项目名时，早期检查误搜demo并命中C语言demo目录和upgrade-modal，属于错误候选；已加泛称不能充当项目名的判断，先补项目名/范围。明确three feet under时正常实际搜索，不靠项目名白名单。
+- 状态：已改本地、已核实并停止两个本仓库8775旧进程，隐藏重启；最终/api/status ready=true，保持用户当前deepseek-r1:7b聊天、qwen3:8b工具。最后代码变动只在测试替身，生产服务已加载最终实现。原称呼/旧消息/账户资料/小精灵未改，无推送GitHub、无上线。自评仍客服套话和无依据声称已调整的问题本轮未解决，没有扩展修改模型人格。
+
+## [2026-11-07] 能力自评改用当前服务配置和工具状态
+- 改了：`training/runtime_capabilities.py:1-21` —— 判断能力自评并整理确定性报告；R1凭空泛泛评价/声称已调整 → 根据实际运行状态区分已接入、未就绪、未实测以及建议，不声称修改程序/自我升级/检查日志或全盘检查。报告不是特定问句写死答案，适用于多种自评表达，但措辞结构固定且由程序生成，不伪称模型自行审计。
+- 改了：`training/chat_web.py:71-85、311-312` —— 统一运行状态和自评入口；新增runtime_status供/api/status与能力快照共用，工具名称描述引用当前处理函数而非复制健康清单；Pi可用条件同时核对依赖和当前工具模型是否安装。调用成功/网络可达未测试时不会报正常。
+- 改了：`training/web_lookup.py:16、108` —— 自评搜索分流；宽泛“你/自己/能力”拦截 → 共用自评识别，外部插件/GitHub/最新方案以及英文外部产品技术查询不被自评规则吞掉；no-network原有优先检查保留，普通调侃不进入自评。
+- 改了：`training/test_runtime_capabilities.py:1-27` —— 检查不同自评表达、外部优化方案和Python性能搜索、不联网、调侃不走身份自评；HTTP覆盖称呼、保存正文与发送一致、工具/模型失败不报可用且无虚假执行。
+- 因为：用户自评请求此前仅得到泛泛反馈邀请，另一次无依据声称自己已调整。模型没有读取运行配置的能力，继续叠提示无法成为真实状态；采用有限确定性报告，不做全局人格重构、不无限抽样、不换模型。
+- 我能改：`training/runtime_capabilities.py:4-10` 的EXTERNAL/is_self_assessment调整自评和外部请求边界；`training/runtime_capabilities.py:20` 的建议句可修改。已接入列表取自`training/chat_web.py:84`的实际函数引用；描述的状态不是外部服务健康保证。
+- 工具：PowerShell——核实8775监听及命令行，保持原模型重启；Python unittest——22项针对检查通过（runtime2/project3/local模型与auto_search实际合计22），HTTP——最终服务真实请求核对能力、限制、建议与无执行声称。可手动替代，无新插件/付费。
+- 一句话总结：具体说明已有能力和限制，不再只邀请反馈或假称自己已经升级。
+- 真实HTTP：当前/api/status为ready=true、deepseek-r1:7b聊天/qwen3:8b工具；“我要给你加什么功能吗你查查你自己有没有什么优化的”以及“不要联网，你还需要补充什么功能”均带BOOS、delta+done，保存正文等于发送正文。回答明确模型已安装但未做生成质量测试、网页/天气/文件定位/记忆/提醒入口已接入、Pi依赖和模型安装、外部服务未测连通、BBC源/城市天气/文件近似候选的限制，并提出来源日期核对和多轮验收两条建议，明确还没有执行。未出现维他命B12跑题或自称已经修改，也没有搜索状态事件。
+- 失败验证：模拟模型连接失败/Pi缺失时，实际临时HTTP返回“服务未就绪”“Pi依赖或工具模型未就绪”，没有报工具可执行。未读取聊天内容进行自我审计、未查看日志/全盘、未读用户文件。
+- 状态：已改本地并仅停止核实的本仓库8775监听进程后隐藏重启生效，模型分工保持原样；原账户称呼与文件查找成果保留。未提交、未推送GitHub、未上线。外部方案搜索只验证路由，未做真实联网验收；普通R1调侃实际措辞和整体伴侣感未验证/未保证稳定，这类自评是程序报告，不能等同模型自我审计或已执行优化。
+
+## [2026-11-07] 文件结果卡片、授权图片预览和安全基本Markdown
+- 改了：`training/file_preview.py:1-43` —— 从已保存候选构造名称/路径/目录类型/匹配程度/未核实提示和预览地址；原来只有路径文字 → 图片仅用聊天ID/消息ID/候选序号定位，绝不接收任意路径。当前cookie账户必须拥有聊天，消息必须属于该聊天且保存file_lookup候选；路径同时须在保存根和当前允许根内，拒绝路径遍历、symlink/junction；仅PNG/JPEG/WebP，8MB、1600万像素上限，缩到2048后重新编码PNG并移除元数据，不执行文件。
+- 改了：`training/browser_store.py:125-129、147-154`及`training/chat_web.py:133-148、460-463` —— 历史和实时回复的卡片数据及预览接口；旧search_evidence派生file_results，无新数据库表/列；保留原文字fallback和称呼。历史缺匹配类型时显示未记录，不冒充精确匹配。预览失败返回统一403安全原因，Cache-Control no-store。
+- 改了：`training/project_lookup.py:72` —— 保存match字段区分exact/approximate/project，未改变搜索权限和目录。
+- 改了：`training/browser/answer-view.js:1-36` —— DOM-only基本Markdown和卡片；段落、列表、标题、粗体、行内代码/代码块、复制代码及HTTP(S)链接。原始HTML用textContent显示，拒绝javascript/data/file链接，外链noopener noreferrer。无innerHTML、无新Markdown依赖；用户消息仍纯文本，不支持完整CommonMark/表格等高级语法。
+- 改了：`training/browser/app.js:117-126、198、238-289`及`training/browser/index.html:6` —— 接入新脚本；历史完成回复直接排版；流式阶段只显示原始逐字正文，不每字解析；完成/停止时解析一次。复制整段回答取rawText，不因按钮文案或原formatAssistantText合并破坏代码换行。收到files事件和刷新后的file_results均显示卡片。停止/切聊天保留原队列取消机制。
+- 改了：`training/browser/styles.css:1197-1200` —— 卡片路径可换行、代码块内部横向滚动，预览对话框限制窗口大小；窄屏关闭的陪伴栏/侧栏visibility隐藏，避免露出屏幕边缘或键盘焦点落入隐藏栏。未重设计页面/宠物。
+- 改了：`training/test_file_preview.py:1-35` —— 临时图片和真实HTTP检查授权/跨账户/未登录/序号越界/范围外/8MB限制/穿越/实际symlink拒绝/伪装SVG内容。当前环境实际可创建symlink，拒绝测试执行成功。
+- 因为：用户确认需要文件卡片和回答排版，直接开放任意本地路径或innerHTML会让模型/网页内容越权读取或执行，因此使用保存候选授权和安全DOM。没有盲装大解析器、全盘浏览、文件执行、来源折叠、重试、导出或整体改版。
+- 我能改：`training/file_preview.py:7-8` 的IMAGE_TYPES/MAX_BYTES；`training/browser/styles.css:1198` 的卡片/代码块样式。预览像素和缩图限制位于`training/file_preview.py:39-40`。
+- 工具：PowerShell——查看代码/核实进程并重启；Python unittest——10项针对检查通过（preview1/project3/stream6），Node——JS语法和typewriter一项检查通过（字符增量/Unicode/drain/cancel）；Pillow——已安装库，预览安全重新编码；Playwright——已安装Python库与Edge headless，真实桌面/窄屏交互。无新插件或依赖安装。使用前已告知并读取frontend-testing-debugging技能，Browser plugin not available，按技能走Playwright fallback。
+- 一句话总结：找到的文件能复制路径、受控预览，回答清楚排版，保留逐字输出。
+- 浏览器验收：临时隔离数据库服务，1365x900桌面/390x844窄屏，URL和标题Orvyth正确、非空、无框架错误页、pageerror列表为空；安全链接可点击、javascript链接未成为链接、script标签与用户HTML仅作文字，列表代码正常；复制代码/路径读回剪贴板一致（Windows CRLF规范化后代码换行一致）。图片按钮→授权图片naturalWidth>0→关闭通过。手机document/body scrollWidth均<=innerWidth，关闭侧栏visibility=hidden，打开/关闭可用。截图为C:\Users\穆柏润\AppData\Local\Temp\orvyth-cards-desktop.png和orvyth-cards-mobile.png。初次复制检测需等待异步已复制状态，并处理OS剪贴板CRLF；等待预览的Playwright表达式改为函数避免CSP unsafe-eval，未放宽应用CSP；窄屏切聊天测试先打开侧栏后点击新聊天，未用隐藏元素强制点击。
+- 流式验收：真实HTTP临时服务使用受控回复生成器，网页发送→逐字完成→代码块print(1)正确；另一条长回复逐字途中停止→打开窄屏侧栏→新聊天，等待后仍无旧消息追加；原typewriter与Python流式协议检查均通过。普通真实模型输出质量不是本轮测试目标。
+- 最终8775：仅停止核实的本仓库监听18884，隐藏重启并保留deepseek-r1:7b聊天/qwen3:8b工具；新隔离浏览器账户真实请求找到`D:\Codex\three feet under\Three-Feet-Under-main\新手教程墓道大致图demo.png`，得到files事件，刷新卡片后点击图片预览，实际解码尺寸1536x1024。该文件约3MB，预览成功；只验证展示与授权，不评价图片是否用户目标。实际预览截图C:\Users\穆柏润\AppData\Local\Temp\orvyth-real-diagram-preview.png。用户原聊天/资料未改，未上传图片到外网。
+- 状态：已改本地、已重启生效、未提交/未推送GitHub/未上线。未验证Firefox/Safari、所有Markdown语法、所有图片损坏方式或极端并发文件替换场景；原始HTML/危险链接不是支持功能。有限预览接口不等于任意文件访问，图片预览不是视觉模型理解。角色/口吻/全局架构本轮未扩展。
+
+## [2026-11-07] 高级简约外观与雾白暖砂深墨三套配色
+- 改了：`training/browser/styles.css:1202-1221` —— 页面视觉；8-11px辅助文字和分散控件样式 → 基于共享颜色变量统一正文/辅助文字/留白/按钮/输入区/侧栏/文件卡片/代码块/任务/设置/图片预览表面，新增mist雾白、sand暖砂、ink深墨。主正文16px，输入框16px，辅助信息通常11-13px。保留三栏结构和现有功能，尊重reduce-motion，不改精灵3D模型、伴侣口吻或工具权限。
+- 改了：`training/browser/appearance.js:1-11` —— 浏览器级视觉偏好；无配色选择 → 设置内即时切换、aria-pressed选中/预览、localStorage键orvyth-appearance-v1保存并刷新恢复。只接受mist/sand/ink，读取失败默认mist，写入失败给提示，不混进账户资料/人格/权限。脚本在样式前载入，先恢复外观再绘制。
+- 改了：`training/browser/index.html:6、42` —— 载入脚本并设置分组；新增外观、个人资料、小精灵层次。原称呼/动态效果等保留，没有恢复用户取消的亲密程度、回复长度、模型选择或联网开关。配色说明写明即时生效、仅当前浏览器；不是账户同步。
+- 改了：`training/chat_web.py:161` —— 仅增加appearance.js同源静态资源映射，未改后端模型、工具接口或业务路由。
+- 改了：`training/browser/appearance.js:6`及`training/browser/styles.css:1221` —— 将原index.html欢迎到达过渡的内联脚本/样式移至外部同源文件；实际控制台发现旧内联代码被CSP拦截，现保留过渡且不放宽CSP，背景跟随当前主题。没有改变粒子启动页面运动或精灵。
+- 因为：用户确认高级感简约、舒适大气，并要求设置切换颜色；只读检查显示文字过小、设置单列过长、主次层次不足。保留当前产品的信息架构，按共享配色/字体/间距做增量完善，不另起新站、堆渐变装饰或额外动效。
+- 我能改：`training/browser/styles.css:1203-1205`的三套颜色变量；`training/browser/appearance.js:3`的key/themes/current默认值。用户操作入口：左下角头像→设置→外观；手机先打开左上角聊天列表。
+- 工具：PowerShell——读代码、核查并仅重启8775原监听进程54784；Python Playwright+Edge headless——真实浏览器截图/交互；Node——appearance.js/app.js语法检查；view_image——检查原桌面/手机/设置截图及最终三个主题、首页、手机设置。读取并告知frontend-testing-debugging与frontend-app-builder技能；Browser plugin not available，按技能使用现有Playwright fallback。按用户省额度和既有产品增量范围，没有额外ImageGen概念图、依赖安装、付费工具或子代理。
+- 一句话总结：保持简洁，同时让页面更易读、层次更清楚，并能选择舒服的配色。
+- 只读发现：1440桌面侧栏218px/陪伴274px、正文14px，脚注9px/手机8px，手机发送按钮33px；设置超过手机视口需要滚动，原界面主次不清。本轮主输入/正文16px、发送40-42px、辅助层次更清晰，设置分组并保留滚动，固定可见的操作区域。
+- 验收：临时隔离数据库桌面1365x900与手机390x844，三主题选择/选中状态、深墨与暖砂刷新恢复、卡片/代码/路径复制、授权图片预览、真实HTTP受控生成的逐字完成/停止/切聊天均通过，未出现旧队列追加。截图C:\Users\穆柏润\AppData\Local\Temp\orvyth-refined-mist.png、orvyth-refined-ink.png、orvyth-refined-settings-ink.png、orvyth-refined-sand-mobile.png。只执行一次代表性完整交互，没有为每主题重复全套测试；未改低影响样式镜像测试。
+- 当前8775真实验证：保留deepseek-r1:7b聊天/qwen3:8b工具，静态脚本成功提供。雾白/暖砂/深墨实测正文对比分别14.35/12.92/12.42，辅助文字4.98/5.28/6.66，主按钮文字7.26/6.35/9.83（均>=4.5）。设置选主题、刷新恢复、偏好不在账户profile中、390px无document/body横向溢出、实际Tab键焦点2px可见、reduce-motion环境下手机侧栏→头像→设置流程通过。手机截图orvyth-refined-live-mobile-settings.png、orvyth-refined-live-mobile.png；桌面首页orvyth-refined-home.png、深墨设置orvyth-refined-live-settings.png。
+- 验收中的脚本问题（不是通过）：初次用.focus()后断言focus-visible不正确，后改真实Tab验证通过；初次手机脚本在开侧栏前等待隐藏profile按钮导致超时，未修改产品去显示隐藏按钮，改为先等message并打开侧栏后通过；欢迎过渡1秒class在reload等load后已移除，首次等待超时不能算通过，改页面初始化MutationObserver记录class出现并等待移除后实际通过。PowerShell最后exit0不能掩盖上述Python失败；本条仅记录最终独立断言成功的结果。
+- 控制台：首次收集发现原欢迎页内联脚本/样式两条CSP错误，已迁移到同源文件；最终实际页面含一次欢迎过渡，console error/warning均为空、过渡出现和移除均验证。没有添加unsafe-inline/unsafe-eval。
+- 状态：已改本地、8775已重启生效（欢迎过渡最终静态文件更新直接生效），未提交/未推送GitHub/未上线。原聊天记录、称呼、小精灵模型、文件授权规则未改；没有生成真实模型回答质量测试。未验证Safari/Firefox、操作系统高对比模式、所有历史状态或浏览器禁用localStorage的实际UI分支，相关失败提示已实现但未宣称实测。最终截图已用view_image检查；临时脚本不在仓库，保留交付截图作为证据。
+- 行号校正（只追加）：欢迎到达过渡的sessionStorage处理实际在`training/browser/appearance.js:7`；前述第6行为调用apply恢复主题，行为描述不变。
