@@ -1,7 +1,7 @@
 """普通聊天边界检查；不生成闲聊台词，不修改原始历史。"""
 import re
 PROTECTED = re.compile(r'(```[\s\S]*?(?:```|$)|`[^`]*`|https?://\S+)')
-EMOJI = re.compile(r'[\U0001F1E6-\U0001FAFF\u2600-\u27BF](?:[\uFE0F\u200D\U0001F1E6-\U0001FAFF\u2600-\u27BF])*')
+EMOJI = re.compile(r'[0-9#*]\uFE0F?\u20E3|[\uFE0E\uFE0F\u200D\u20E3\U000E0020-\U000E007F]|[\U0001F1E6-\U0001FAFF\u2600-\u27BF](?:[\uFE0F\u200D\U0001F1E6-\U0001FAFF\u2600-\u27BF])*')
 def without_emoji(text):
     parts = PROTECTED.split(text)
     return ''.join(part if i % 2 else EMOJI.sub('', part) for i,part in enumerate(parts))

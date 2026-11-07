@@ -135,6 +135,13 @@ class Store:
             rows = db.execute("SELECT role,content FROM messages WHERE chat=? ORDER BY id DESC LIMIT 16", (chat,)).fetchall()
             return [dict(row) for row in reversed(rows)]
 
+    def latest_search_evidence(self, owner, chat):
+        """Only the immediately preceding assistant reply, in this owner's chat."""
+        with self.connect() as db:
+            self.require_chat(db, owner, chat)
+            row = db.execute("SELECT search_evidence FROM messages WHERE chat=? AND role='assistant' ORDER BY id DESC LIMIT 1", (chat,)).fetchone()
+            return json.loads(row[0]) if row and row[0] else None
+
     def chat_action(self, owner, action, chat=None, title=None):
         with self.connect() as db:
             if action == "new":
