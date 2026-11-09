@@ -11,8 +11,9 @@ def cards(chat, message, evidence):
     if not evidence or evidence.get('kind')!='file_lookup':return []
     result=[]
     for index,value in enumerate(evidence.get('paths',[])[:8]):
+        if evidence.get('selected_index') is not None and index != evidence['selected_index']:continue
         path=Path(value)
-        result.append({'name':path.name,'path':str(path),'kind':'directory' if path.is_dir() else 'file','match':evidence.get('match','unverified'),'notice':'仅按名称定位，内容与用途未核实','preview_url':'/api/file-preview?'+urlencode({'chat':chat,'message':message,'index':index}) if path.suffix.lower() in IMAGE_TYPES else None})
+        result.append({'name':f'{index+1}. {path.name}','path':str(path),'kind':'directory' if path.is_dir() else 'file','match':evidence.get('match','unverified'),'notice':'仅按名称定位，内容与用途未核实','preview_url':'/api/file-preview?'+urlencode({'chat':chat,'message':message,'index':index}) if path.suffix.lower() in IMAGE_TYPES else None})
     return result
 
 def preview(path, evidence):

@@ -24,6 +24,8 @@ def natural_location(question):
     return match[1].upper()+':\\'+rest if rest else None
 
 def file_request(question, history, context=None):
+    if re.search(r'网上|联网|网站|网页|https?://',question) and not re.search(r'本地|电脑|[A-Za-z]:[\\/]',question):
+        return None
     located=locate_project(question,history,context)
     if located:return located
     path_given=bool(re.search(r'[A-Za-z]:[\\/]|https?://',question))

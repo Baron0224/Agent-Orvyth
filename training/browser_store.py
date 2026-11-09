@@ -45,6 +45,8 @@ class Store:
             """)
             if 'search_evidence' not in {row['name'] for row in db.execute('PRAGMA table_info(messages)')}:
                 db.execute('ALTER TABLE messages ADD COLUMN search_evidence TEXT')
+            if "usage" not in {row["name"] for row in db.execute("PRAGMA table_info(messages)")}:
+                db.execute("ALTER TABLE messages ADD COLUMN usage TEXT")
             columns = {row["name"] for row in db.execute("PRAGMA table_info(tasks)")}
             if 'task_trace' not in {row['name'] for row in db.execute('PRAGMA table_info(messages)')}:
                 db.execute('ALTER TABLE messages ADD COLUMN task_trace TEXT')
@@ -123,9 +125,10 @@ class Store:
                         item["remind_due"] = not item["done"] and not item["waiting"] and today >= item["start_date"] and now.strftime("%H:%M") >= item["remind_time"]
                 tasks.append(item)
             messages = []
-            for row in db.execute("SELECT id,role,content,task_trace,search_evidence FROM messages WHERE chat=? ORDER BY id", (profile["active_chat"],)):
+            for row in db.execute("SELECT id,role,content,task_trace,search_evidence,usage FROM messages WHERE chat=? ORDER BY id", (profile["active_chat"],)):
                 item={'role':row['role'],'content':row['content']}
                 if row['search_evidence']:item['file_results']=cards(profile['active_chat'],row['id'],json.loads(row['search_evidence']))
+                if row['usage']: item['usage']=json.loads(row['usage'])
                 if row['task_trace']: item['task_trace']=json.loads(row['task_trace'])
                 messages.append(item)
             return {"profile": {**DEFAULTS, **{k: v for k, v in json.loads(profile["profile"]).items() if k not in RETIRED}}, "chats": chats, "tasks": tasks,
@@ -178,13 +181,15 @@ class Store:
             else:
                 raise ValueError("未知聊天操作。")
 
-    def save_pair(self, owner, chat, question, answer, task_trace=None, search_evidence=None):
+    def save_pair(self, owner, chat, question, answer, task_trace=None, search_evidence=None, usage=None):
         with self.connect() as db:
             row = self.require_chat(db, owner, chat)
             address = json.loads(db.execute("SELECT profile FROM owners WHERE id=?", (owner,)).fetchone()["profile"]).get("user_address", "")
             answer = addressed(answer, address)
             db.executemany("INSERT INTO messages(chat,role,content) VALUES (?,?,?)", [
                 (chat, "user", question), (chat, "assistant", answer)])
+            if usage:
+                db.execute('UPDATE messages SET usage=? WHERE id=last_insert_rowid()', (json.dumps(usage),))
             if search_evidence:
                 db.execute('UPDATE messages SET search_evidence=? WHERE id=last_insert_rowid()', (json.dumps(search_evidence,ensure_ascii=False),))
             if task_trace:

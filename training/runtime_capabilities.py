@@ -13,7 +13,7 @@ def assessment(snapshot):
     status=snapshot['status']
     model=status.get('model','未确认')
     lines=['作为你的私人AI秘书，我先按当前配置帮你理清范围。这次只核对配置和工具状态，没有查看日志、扫描电脑或修改程序。']
-    lines.append('当前聊天模型：'+model+'；'+('模型已安装，尚未做本轮生成质量测试。' if status.get('ready') else '聊天服务未就绪或模型未安装，先恢复连接再谈增加功能。'))
+    lines.append('当前聊天模型：'+model+'；'+(status['message'] if status.get('provider') == 'deepseek' else ('模型已安装，尚未做本轮生成质量测试。' if status.get('ready') else '聊天服务未就绪或模型未安装，先恢复连接再谈增加功能。')))
     lines.append('已接入：'+ '、'.join(snapshot['registered'])+'。这些入口已接入不代表本轮外部服务调用成功。')
     lines.append('文件工具：'+('Pi依赖和工具模型已安装；尚未实际读取文件验证。' if snapshot['pi_ready'] else 'Pi依赖或工具模型未就绪，目前不能保证文件内容读取/Word工具能执行。'))
     lines.append('使用范围：联网搜索、天气服务本轮未测连通；新闻只用BBC公开源，不能当完整的国内新闻；天气只提供城市坐标模型数据，不能当区内实测。文件名称查找有限时和范围，近似候选不等于内容确认。')

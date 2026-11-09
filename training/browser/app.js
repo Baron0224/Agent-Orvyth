@@ -204,8 +204,8 @@ async function checkConnection() {
   const status = $('#connection'); status.textContent = '正在连接'; status.className = 'connection';
   try {
     const data = await requestJSON('/api/status'); ready = data.ready;
-    status.textContent = ready ? '可以聊天' : '暂未连接'; status.className = `connection ${ready ? 'ready' : 'error'}`;
-    $('#reconnect').hidden = ready; setNotice(ready ? '' : data.message);
+    status.textContent = data.provider === 'deepseek' ? (data.verified ? '云端曾连接成功' : data.configured ? '密钥已配置·未验证' : '云端未配置') : ready ? '可以聊天' : '暂未连接'; status.className = `connection ${ready ? 'ready' : 'error'}`;
+    $('#reconnect').hidden = ready; setNotice(data.provider === 'deepseek' ? data.message : ready ? '' : data.message);
   } catch {
     ready = false; status.textContent = '服务已断开'; status.className = 'connection error'; $('#reconnect').hidden = false;
     setNotice('请保持启动窗口开启，再点检查连接。');

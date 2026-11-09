@@ -398,3 +398,55 @@
 - 上轮未通过及本轮实际代表性复测：R1收到v2仍先概念/长篇/客服；精确澄清preference为合法格式偏好后一次复测仍未遵循。11-09增加有限格式计划后，仅一次实际“请教我编程里的变量”新隔离账户请求，回答先给x=5/x="hello"代码例子再解释，顺序有改善，但没有要求的“## 示例/## 解释”两段标记，仍较长且扩展作用域/命名/类型转换，严格format_pass=false。程序保留原文，没有语义猜测搬句子、隐藏重试或再请求模型。该次包含编程说法不能视作全部事实正确；只验证档案取用与输出顺序。本轮清理了自己的隔离测试账户记忆，未清用户原档案。
 - 本机服务：开始8775已运行，核实监听59100及命令行后仅停止此服务，隐藏重启原deepseek-r1:7b聊天/qwen3:8b工具配置；实际/api/status ready=true，模型不变；当前服务已载入最终格式代码，stderr无新增错误。API来源/搜索/前端页面/精灵本轮未改。
 - 交付状态：已改本地、已重启生效、未提交、未推送GitHub、未上线。结构化档案、设置管理、旧数据兼容、隔离、预算与确定性个人事实查询可交付；有限清晰分段调序可用，当前R1严格表达格式、简短程度和恋人式自然口吻仍未稳定达标。词面相关性选择不等于语义检索，可能漏掉复杂同义问法；不做自动画像或额外模型抽取。Pi工具执行和全部浏览器/损坏旧文件场景未重新实测，不能声称无所有限制。
+
+## [2026-11-09] 增加独立DeepSeek云端聊天入口并保留伴侣感口吻
+- 改了：`training/deepseek_cloud.py:1-46` —— 官方接口传输；原来只用本机Ollama → 新增固定https://api.deepseek.com/chat/completions、deepseek-flash、thinking.type=disabled、stream_options.include_usage。只转发正文，不转发reasoning_content；读完stop与DONE才成功，截断/缺DONE/错误不保存。401/402/429/超时用固定提示，不打印官方错误正文、密钥，不重试、无静默本地回退。使用标准库，无新依赖。
+- 改了：`training/chat_local.py:41、83-103、185-242` —— 共用聊天生成；支持明确deepseek-cloud前缀，其他cloud模型仍拒绝；原PERSONA、角色绑定、称呼、记忆、预算、格式和正文清理继续使用；云端不执行原本地质量重试，避免额外付费；每轮重置usage。身份和默认隐私按实际提供商说明，不冒称云端本机运行。
+- 改了：`training/chat_web.py:53-116、129-153、410-471` —— 网页服务；新增provider/configured/verified状态，不探测付费接口，配置不等于连接成功；云端默认独立Orvyth/cloud/browser.sqlite3与orvyth_cloud_session，原本地数据库/记录/记忆不复制不删除，文件工具仍qwen3:8b且拒绝云端工具配置。说明本轮选中问题/历史/档案/网页摘要送往DeepSeek，文件工具虽然本机执行，保存在此聊天中的文件内容可能被后续选中历史送往云端。成功完整生成并保存后标记曾成功。
+- 改了：`training/cloud_launch.py:1-42`、`training/chat_cloud.cmd:1-8` —— 独立启动；原无云端入口 → 8776云端启动，本地8775保留。优先DEEPSEEK_API_KEY，否则本机getpass隐藏输入；不能隐藏则取消，拒绝回显降级；不写盘、不放命令参数，只传子进程环境，不自动替用户打开输入窗口或读取凭据文件。
+- 改了：`training/browser_store.py:48-49、128-132、184-192` —— SQLite记录；增加可空usage列，成功助手消息保存提供商/模型与官方用量计数，通过完成事件及api/session可核对，旧消息兼容。失败/截断不会插入问答对。`training/browser/app.js:207-208`和`training/runtime_capabilities.py:16` —— 连接说明；云端仅配key显示“密钥已配置·未验证”，保留可尝试发送，不能误写模型已安装或API已连通；无界面模型选择或网络开关。
+- 改了：`training/CLOUD_CHAT.md:1-29` —— 用户说明；包含准确启动路径、隐藏输入、独立资料、用量非账单、已生成可能计费、失败不回退和官方文档。`training/test_deepseek_cloud.py:1-147` —— 模拟云端与真实回环HTTP检查；假key、鉴权/请求体/口吻原文/称呼/思考禁用/分片SSE/usage/关闭连接/截断与断流/401402429不保存/无重试/无key/默认路径/Cookie隔离/本地兼容；没有真实API访问。
+- 因为：用户需要云端回答，同时保留热恋般亲近、自然简洁、无重复套话和emoji的表达。选择独立入口方便对比和限定数据范围，不直接替换本地，不自动搬移账户资料，不以固定甜话或反复付费生成掩盖实际质量。
+- 我能改：`training/deepseek_cloud.py:37` 默认512，可通过ORVYTH_CLOUD_MAX_TOKENS设置16到2048；token是模型计量文字的单位。`training/cloud_launch.py:29-31`控制启动端口和模型；`training/PERSONA.md:1-7`仍是口吻来源，未改变用户原人设要求。
+- 工具：PowerShell与git只读检查及运行；Python标准库urllib/getpass/subprocess/sqlite3及unittest模拟测试；Node --check校验已有网页脚本。没有新依赖、插件、子代理、付费请求、凭据文件读取或Git推送。
+- 一句话总结：本机增加独立云端聊天入口并保留共用亲密口吻，密钥和API实际可用性由用户本机启动验证。
+- 验证：首轮57项暴露模拟环境缺Home和本地done多出usage:null两处，已修正，未修改旧断言掩盖；最终61项全部通过（cloud7、local_models10、chat_stream6、reply_format2、memory_profile2、hermes_memory4、chat_web28、persona2）。Python编译、Node语法、git diff --check通过。另启动真实chat_web子进程，强制移除子进程DEEPSEEK_API_KEY、临时数据/临时端口，GET状态provider=deepseek/configured=false/verified=false/ready=false，云端cookie独立、空消息、隐私说明包含DeepSeek、stderr空；已停止该临时子进程并清理自己的临时目录，未停止现有8775服务。
+- 状态：已改本地；云端生产入口尚待用户运行，未用真实密钥验证、未发起付费请求，不能称真实云端连通或实际恋人式口吻达标。现有本地进程未重启、未提交、未推送GitHub、未上线。执行：PowerShell & "D:\Codex\Orvyth\training\chat_cloud.cmd"；在自己终端输入密钥，地址127.0.0.1:8776，首次需重新设置称呼和精灵名。
+
+## [2026-11-09] 云端启动支持明确选择加密保存密钥和忘记
+- 改了：`training/cloud_credentials.py:1-77` —— Windows当前用户密钥存取；不持久化 → 通过ctypes调用CryptProtectData/CryptUnprotectData，UI_FORBIDDEN且不设LOCAL_MACHINE，输出缓冲清零后LocalFree。固定仓库外%LOCALAPPDATA%/Orvyth/credentials/deepseek.dpapi；密文临时文件写入flush/fsync后os.replace，空密钥不保存，损坏不自动删除，忘记仅unlink固定文件不递归。
+- 改了：`training/cloud_launch.py:12-79`、`training/chat_cloud.cmd:4-6` —— 启动；环境变量优先，其次本程序加密文件，最后隐藏输入。首次手动输入后y明确保存/默认回车仅本次/c或中断取消启动；不能隐藏则取消。解密/保存失败固定提示，不显示原异常或key，保存失败仍可仅本次用。--forget-key先确认y，只删固定文件，明确环境变量及已运行服务不受影响。启动模型/8776/本地8775与子进程环境传递保留。
+- 改了：`training/CLOUD_CHAT.md:9-21` —— 第一次保存、以后免输、同账户仍可能解密、忘记命令及下次启动生效说明；微软依据https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata及对应CryptUnprotectData文档。`training/test_cloud_credentials.py:1-60`验证虚拟密钥真实DPAPI临时目录往返/磁盘非明文/空输入/损坏保留/删除范围，以及mock优先级/同意/取消/失败/无参数日志泄露；`training/test_deepseek_cloud.py:98-104`更新旧启动mock使其不读取真实保存文件并明确main([])。
+- 因为：用户不想每次粘贴API密钥；选择Windows原生当前账户加密而不写明文.env/源码/注册表，且必须明确同意才持久化。同账户程序仍可能解密，不保证绝对安全。
+- 我能改：`training/cloud_launch.py:52`选择提示；启动输入y保存，回车仅本次，c取消；手动运行 & "D:\Codex\Orvyth\training\chat_cloud.cmd" --forget-key 后y确认清除。环境变量优先且不由此命令删除，旧服务可能仍持有key。
+- 工具：PowerShell执行只读检查和针对测试；Python标准库ctypes/Windows DPAPI、临时文件、unittest；浏览工具核实Microsoft官方文档，无新增依赖或插件。
+- 一句话总结：首次手动输入后明确选择加密保存，以后同Windows账户启动可免输，并可以确认忘记。
+- 验证与状态：4项新测试+1项既有启动定向测试通过，真实DPAPI仅使用临时目录虚拟字符串，未读/解密/保存任何用户真实凭据，未访问浏览器或付费API，未停止/重启现有服务，未改模型/前端/数据库/用户资料，未提交/推GitHub。首次取消测试fixture把KeyboardInterrupt误当普通值导致失败，改BaseException后验证通过。仅已改本地，真实保存流程待用户下次手动启动选择；未自动打开输入窗口。
+
+## [2026-11-09] 修复命名项目图纸请求退回旧位置提示
+- 改了：`training/project_lookup.py:8-26、37-39` —— 个人项目名称定位；原personal依赖“我”且local只认文件夹/本地/电脑/目录/盘路径 → 新增找/查找/查看/预览/读取+项目名+项目/文件夹/目录+里的结构识别，无需“我的”，中英文空格可用。解析先分开中英文标点和尾部先只/不修改限制，不让执行限制混入文件名称。仍复用原限定范围、时间/数量限制及当前账户当前聊天file_lookup状态，不硬编码项目名/路径。
+- 改了：`training/file_chat.py:26-28` —— 请求分配；明确网上/联网/网站/网页/URL且没有明确本地位置的请求不落本机查找，普通知识/聊天不变。`training/test_project_lookup.py:12-37` —— 临时目录独立云端HTTP测试，原句、Moon Harbor/晨星计划、空格、无“我的”、连续对/好的，mock模型/cloud/lookup/Pi一旦调用即失败，验证候选路径/预览卡片/成功结束/文件字节不变；沿用既有跨聊天跨账户隔离测试和预览权限检查。
+- 因为：实际原句“帮我找 three feet under 项目里的图纸 demo，先只查找和预览，不修改任何文件。”personal因“帮我找”的我命中，但local不认“项目”，locate_project返回None，file_chat随后回PROJECT_LOCATION。源码时间11-07早于8776进程11-09 11:52启动，当前源码自身复现同缺陷，不能归为旧进程/模型/token问题。修路由而不换模型或靠提示词。
+- 我能改：`training/project_lookup.py:8-10`命名项目句式；`:13`执行约束分隔方式。启动仍用 & "D:\Codex\Orvyth\training\chat_cloud.cmd"。
+- 工具：PowerShell检查进程启动命令/时间与文件时间；Python标准库HTTP/临时目录/unittest.mock和既有预览测试，无插件、新依赖、代理、付费请求或推送。
+- 一句话总结：明确说某项目里的图纸即可只读搜索允许范围，不再先索要路径。
+- 验证：最终14项通过（project_lookup4、file_chat与file_preview共10），git diff --check通过。首次新测试误用helper.send返回元组导致AttributeError，改直接HTTP请求；随后网络负例暴露网上请求误落本机，补网络分流后通过。该失败负例曾执行默认范围名称搜索，未读文件内容、未写文件。随后仅允许D:/Codex范围只读名称定位找到Three-Feet-Under-main/新手教程墓道大致图demo.png和其他近似demo候选，未核对内容；仍标近似/范围可能不全，不假称唯一正确图纸。GET8776/api/status确认provider=deepseek/model=deepseek-flash/configured=true/verified=true；不读密钥/env/用户cookie，不生成API请求。
+- 生效状态：已改本地，8776现有进程没有热加载入口且已在代码修改前启动，未重启，不提取进程密钥，不启动需输密钥窗口，不向旧8776发送可能收费的原句。由用户Ctrl+C关闭原云端窗口后运行原启动命令，再用原句验收；已保存密钥可由启动器自行读取，未保存才需用户输入。原聊天和资料不改，未提交/未推GitHub/未上线。
+
+## [2026-11-09] 图纸demo候选排除明显无关音频
+- 改了：`training/project_lookup.py:79-92` —— 名称候选筛选；英文demo兜底混入音频 → 图纸/绘图请求排除音频、视频、可执行与压缩包，音频/音效/声音请求保留音频扩展名，不全局把demo当图片。同名图片保留各自目录；合理文档/绘图及未知扩展名保留名称候选但声明用途未核实，匹配描述的目录也仅为未核实候选。类型筛选无命中时paths为空、明确未找到类型匹配候选，不用项目目录冒充图纸。
+- 改了：`training/test_project_lookup.py:12-27、99` —— 临时目录混合png/pdf/wav/ogg/unknown及两张同名图、音频请求与仅音频剩余的空结果检查；旧无文件断言按新需求改为空候选，匹配图纸demo目录仍保留。
+- 因为：用户已实际确认预览可用，本轮只修组合图纸描述退回英文demo后忽略类型；不硬编码项目名/图片、不做UI或版本推断。
+- 我能改：`training/project_lookup.py:81-84`的扩展名集合。
+- 工具：PowerShell和Python unittest/临时目录，无依赖、模型、API或子代理。
+- 一句话总结：查图纸排除明显无关音频，同时保留同名图和音频demo能力。
+- 验证与状态：最终项目5项通过；本轮初次联合运行预览1项通过，旧项目2项因新空结果行为/目录候选失败，保留目录候选并更新无匹配断言后项目全通过。未读取真实图片或密钥、未更改用户资料/前端/模型，未重启/关闭服务，未推GitHub。当前进程待用户下次正常重启加载，不要求现在重复重启。
+
+## [2026-11-09] 文件候选支持当前聊天内序号选择与返回
+- 改了：`training/project_lookup.py:35-51、72-74、109` —— 候选任务承接；原列出路径后序号未进项目路由 → 当前file_lookup有paths时识别第二个/第2个/第二张图等，保留原paths和selected_index，选中只返回真实原路径，不读取内容/重复搜索。不是这个/不对/返回候选列表回原列表并清选择，不擅自选下一项。越界含0、多个、这个/那个/下一个等澄清；取消保存file_lookup_cancelled使后续不继承。只对当前聊天最近明确任务生效，普通新题不被序号流程拦截。
+- 改了：`training/file_preview.py:14-16` —— 候选卡片；选中项用原index生成预览URL，name显示同一编号，全列表/文本使用同一顺序；不增加另一套图序号，不改预览权限。`training/test_candidate_selection.py:1-65` —— 临时图片真实回环云端HTTP，查找→第二个/第2个/第二张图→不是这个→第一个→越界→多选→回列表→取消，禁止模型/cloud/网络/Pi及后续重新搜索；验证原索引预览200/PNG、另一账户403、新聊天空上下文和单候选越界不猜。
+- 因为：查找和预览通过后选择缺承接；不用LLM猜路径或再扫描实现，不增加新功能/模型/前端布局，保留上一轮类型过滤。
+- 我能改：`training/project_lookup.py:44`序号句式，`:41-43`返回列表和否定短句。
+- 工具：PowerShell/Python unittest与临时PIL图片、HTTP隔离服务，零API付费、不读真实图片或key，不派代理不推送。
+- 一句话总结：用户可以在同一候选任务中直接选、否定返回和重选，仍沿用授权预览。
+- 验证与状态：16项有限回归通过（候选1+项目5+预览1+file_chat9）；补充零序号与含糊表达处理后选择1项再次通过，git diff --check通过。未停/重启8776、未提取密钥、未动用户资料或模型；本轮和上一轮筛选均已改本地，待下次用户正常重启加载，不催反复重启。取消和新会话不承接旧选择已测；其他开放式语言不声称全覆盖，图像只用临时虚拟图端点验证。未提交/推GitHub/上线。

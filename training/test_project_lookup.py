@@ -9,6 +9,48 @@ import test_chat_web
 
 REQUEST='帮我找我的three feet under的文件夹中的图纸demo'
 class ProjectLookupTest(unittest.TestCase):
+ def test_artifact_type_excludes_audio_without_losing_duplicate_drawings(self):
+  with tempfile.TemporaryDirectory() as folder,patch('project_lookup.search_roots',return_value=[Path(folder)]):
+   project=Path(folder)/'Sample Project';project.mkdir()
+   for name in ('one/demo.png','two/demo.png','demo.pdf','demo.wav','demo.ogg','demo.unknown'):
+    target=project/name;target.parent.mkdir(exist_ok=True);target.write_bytes(b'not read')
+   plan=file_request('查找Sample Project项目里的图纸demo',[])
+   paths=plan['file_lookup']['paths']
+   self.assertEqual(len(paths),4);self.assertFalse(any(p.endswith(('.wav','.ogg')) for p in paths))
+   self.assertEqual(sum(p.endswith('.png') for p in paths),2)
+   self.assertIn('未知扩展名',plan['reply'])
+   audio=file_request('查找Sample Project项目里的音频demo',[])['file_lookup']['paths']
+   self.assertEqual({Path(p).suffix for p in audio},{'.wav','.ogg'})
+   for path in paths:Path(path).unlink()
+   empty=file_request('查找Sample Project项目里的图纸demo',[])
+   self.assertEqual(empty['file_lookup']['paths'],[])
+   self.assertIn('未找到类型匹配的图纸候选',empty['reply'])
+ def test_named_projects_cloud_route_without_ownership_or_constraint_leak(self):
+  from functools import partial
+  from chat_web import ChatServer
+  variants=[('three feet under','帮我找 three feet under 项目里的图纸 demo，先只查找和预览，不修改任何文件。'),
+            ('Moon Harbor','查找Moon Harbor项目里的图纸demo 先只查找和预览 不修改任何文件'),
+            ('晨星计划','请找晨星计划项目里的图纸 demo, preview only; do not modify files')]
+  with patch('test_chat_web.ChatServer',partial(ChatServer,model='deepseek-cloud:deepseek-flash')):
+   web=test_chat_web.WebChatTest();web.setUp()
+  try:
+   root=Path(web.directory.name)/'allowed';root.mkdir()
+   for name,question in variants:
+    project=root/name;project.mkdir();demo=project/'新手图demo.png';demo.write_bytes(b'candidate-not-read')
+    self.assertEqual(project_parts(question),(name,'图纸 demo' if '图纸 demo' in question else '图纸demo'))
+    web.chat=web.request('POST','/api/chats/new',{})[2]['active_chat']
+    with patch('project_lookup.search_roots',return_value=[root]),patch('chat_web.LocalChat.reply',side_effect=AssertionError('no paid model')),patch('chat_web.lookup',side_effect=AssertionError('no web')),patch('chat_web.run_project',side_effect=AssertionError('no Pi')),patch('chat_local.open_chat',side_effect=AssertionError('no cloud')):
+     for text in (question,'对','好的'):
+      events=web.request('POST','/api/chat',{'chat_id':web.chat,'message':text})[2]
+      answer=''.join(e.get('content','') for e in events)
+      self.assertIn(str(demo.resolve()),answer)
+      self.assertNotIn(PROJECT_LOCATION,answer)
+      self.assertEqual(events[-1]['type'],'done')
+      self.assertTrue(any(e.get('type')=='files' for e in events))
+    self.assertEqual(demo.read_bytes(),b'candidate-not-read')
+   for text in ('three feet under是什么电视剧','介绍Moon Harbor项目','网上查找晨星计划项目里的图纸demo','你好'):
+    self.assertIsNone(file_request(text,[]))
+  finally:web.tearDown()
  def test_parts_and_scope_limits(self):
   self.assertEqual(project_parts(REQUEST),('three feet under','图纸demo'))
   with tempfile.TemporaryDirectory() as folder:
@@ -54,7 +96,7 @@ class ProjectLookupTest(unittest.TestCase):
    project=root/'three feet under';project.mkdir()
    legacy=[{'role':'user','content':REQUEST},{'role':'assistant','content':'BOOS，'+PROJECT_LOCATION}]
    plan=file_request('我找不到了你帮我找啊',legacy)
-   self.assertIn(str(project.resolve()),plan['reply']);self.assertIn('没有找到名称匹配的“图纸demo”',plan['reply'])
+   self.assertEqual(plan['file_lookup']['paths'],[]);self.assertIn('未找到类型匹配的图纸候选',plan['reply'])
    newroot=root/'sub';newroot.mkdir();newproject=newroot/'three feet under';newproject.mkdir();demo=newproject/'图纸demo.txt';demo.write_text('abc',encoding='utf8')
    plan=file_request('"'+str(newroot)+'"',history,nohit['file_lookup'])
    self.assertIn(str(demo.resolve()),plan['reply'])

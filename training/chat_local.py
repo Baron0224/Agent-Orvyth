@@ -4,6 +4,7 @@ from chat_stream import ProseStream, head_ready
 from chat_quality import without_emoji, wrong_addressee, trusted_history
 from pathlib import Path
 from reply_format import plan_for, instruction as format_instruction, arrange
+from deepseek_cloud import is_cloud, open_chat
 import argparse
 import json
 import re
@@ -37,7 +38,7 @@ PRIVACY_NOTICE = (
 def model_info(question, model, display_name='Orvyth'):
     normalized = re.sub(r'[\s，。？！,.?!]', '', question)
     if re.fullmatch(r'你(现在|目前|底层)?(用|用的|使用|使用的|是)(什么|哪个)(AI|ai|大语言|语言|大)?模型(呢|呀|啊|吗)?', normalized):
-        return f'我是{display_name}，Orvyth里的私人 AI 秘书。现在用的是 {model}，在这台电脑上运行。'
+        return f'我是{display_name}，Orvyth里的私人 AI 秘书。现在用的是 '+(model.removeprefix('deepseek-cloud:')+'，通过DeepSeek官方云端API回答；文件工具仍在本机。' if is_cloud(model) else model+'，在这台电脑上运行。')
     return None
 
 
@@ -80,11 +81,15 @@ SYSTEM_PROMPT = CONVERSATION_STYLE + "\n" + """当前没有联网搜索工具，
 
 class LocalChat:
     def __init__(self, model=DEFAULT_MODEL, system_prompt=SYSTEM_PROMPT, privacy_notice=PRIVACY_NOTICE):
-        if "cloud" in model.lower():
+        if "cloud" in model.lower() and not is_cloud(model):
             raise ValueError("请选择已下载的本地模型，不使用云端模型。")
         self.model = model
+        self.provider='deepseek' if is_cloud(model) else 'ollama'
+        self.usage={}
         self.system_prompt = system_prompt
-        self.privacy_notice = privacy_notice
+        if is_cloud(model) and system_prompt == SYSTEM_PROMPT:
+            self.system_prompt = system_prompt.replace('本机 Ollama', 'DeepSeek 官方云端 API')
+        self.privacy_notice = privacy_notice.replace('本机 Ollama', 'DeepSeek 官方云端 API') if is_cloud(model) else privacy_notice
         self.display_name = 'Orvyth'
         self.user_address = ''
         self.memory_context = ''
@@ -95,6 +100,7 @@ class LocalChat:
 
     def reply(self, question):
         """流式生成；只有完整成功的问答才加入内存中的历史。"""
+        self.usage = {}
         if len(question) > 2000:
             raise ValueError("这版先支持每次最多 2000 字，请把问题拆短一些。")
         history = self.history[-16:]
@@ -176,11 +182,12 @@ class LocalChat:
         delivered = ""
         stream_started = False
         try:
-            with opener.open(request, timeout=180) as response:
+            with (open_chat(messages,self.model) if is_cloud(self.model) else opener.open(request, timeout=180)) as response:
                 for line in response:
                     if not line.strip():
                         continue
                     chunk = json.loads(line)
+                    if chunk.get('usage'):self.usage=chunk['usage']
                     if chunk.get("error"):
                         raise RuntimeError(f"本地模型返回错误：{chunk['error']}")
                     content = chunk.get("message", {}).get("content", "")
@@ -210,6 +217,7 @@ class LocalChat:
                 raise RuntimeError(f"未找到本地模型，请先运行：ollama pull {self.model}") from None
             raise RuntimeError(f"本地模型服务出错（HTTP {error.code}），请检查 Ollama。") from None
         except (urllib.error.URLError, TimeoutError, OSError):
+            if is_cloud(self.model):raise RuntimeError('DeepSeek连接失败或超时，本次不保存、不重试，也未切换本地模型。') from None
             raise RuntimeError("连接本地模型失败或超时。请先打开 Ollama，再重试。") from None
         except (json.JSONDecodeError, UnicodeDecodeError):
             raise RuntimeError("本地模型返回了无法读取的数据，请重试。") from None
@@ -226,7 +234,7 @@ class LocalChat:
             return text.removeprefix(self.user_address + '，').strip() if self.user_address else text.strip()
         repeated = greeting and any(without_address(item['content']) == without_address(visible) for item in history if item['role']=='assistant')
         confused = wrong_addressee(visible, self.display_name, self.user_address)
-        if (confused or repeated) and not getattr(self, '_quality_retry', False):
+        if (confused or repeated) and not is_cloud(self.model) and not getattr(self, '_quality_retry', False):
             retry = LocalChat(self.model, self.system_prompt + ('\n上份草稿把AI名字误作用户称呼。请根据当前角色绑定重新回答用户请求，不改名替换草稿。' if confused else ''), self.privacy_notice)
             retry.display_name = self.display_name
             retry.user_address = self.user_address

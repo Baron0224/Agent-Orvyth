@@ -13,6 +13,7 @@ import urllib.error
 import urllib.request
 import webbrowser
 from browser_store import MissingRecord, Store
+from deepseek_cloud import is_cloud
 from chat_local import AVAILABLE_MODELS, DEFAULT_MODEL, LocalChat, SYSTEM_PROMPT, model_info, role_info
 from weather_tool import weather_city, current_weather
 from web_lookup import lookup, should_search, search_query, source_context, official_query, guarded_followup, conversation_followup, OFF
@@ -52,10 +53,25 @@ class ChatServer(ThreadingHTTPServer):
     daemon_threads = True
     def __init__(self, port=8765, model=DEFAULT_MODEL, db_path=None, tool_model=None):
         LocalChat(model)
-        self.store = Store(db_path or default_database_path())
+        self.provider = 'deepseek' if is_cloud(model) else 'ollama'
+        self.cloud_verified = False
+        self.cookie_name = 'orvyth_cloud_session' if is_cloud(model) else 'orvyth_session'
+        self.privacy = WEB_PRIVACY
+        if is_cloud(model):
+            self.privacy = WEB_PRIVACY.replace('发给本机 Ollama；', '发给 DeepSeek 官方云端 API；').replace('作为上下文送给本机模型', '按当前问题选取后作为上下文送给 DeepSeek 云端模型')
+            self.privacy += '云端模型也会收到本轮选取的网页摘要。云端入口使用独立本机资料库，不自动复制本地版记录或长期档案。文件工具仍仅使用本机模型，但保存在此聊天中的文件内容可能随后续选中历史发往云端。'
+        default_path = db_path
+        if db_path is None and is_cloud(model):
+            base = Path(os.environ.get('LOCALAPPDATA', str(Path.home() / '.local' / 'share')))
+            default_path = base / 'Orvyth' / 'cloud' / 'browser.sqlite3'
+        elif db_path is None:
+            default_path = default_database_path()
+        self.store = Store(db_path or default_path)
         self.memory = HermesMemory(self.store.path.parent / 'hermes-memory')
         self.model = model
-        self.tool_model = tool_model or ('qwen3:8b' if model.startswith('deepseek-r1') else model)
+        self.tool_model = tool_model or ('qwen3:8b' if model.startswith('deepseek-r1') or is_cloud(model) else model)
+        if is_cloud(self.tool_model):
+            raise ValueError("文件工具必须使用本机模型。")
         LocalChat(self.tool_model)
         self.generation_lock = threading.Lock()
         self.chat_locks = {}
@@ -72,6 +88,14 @@ class ChatServer(ThreadingHTTPServer):
 
     def runtime_status(self, owner=None):
         model=self.selected_model(owner) if owner else self.model
+        if is_cloud(model):
+            configured = bool(os.environ.get('DEEPSEEK_API_KEY', '').strip())
+            try: names = {item.get('name') for item in self.installed_models()}
+            except (OSError, ValueError, urllib.error.URLError): names = set()
+            return {'ready': configured, 'configured': configured, 'verified': self.cloud_verified,
+                    'provider': 'deepseek', 'model': model.removeprefix('deepseek-cloud:'),
+                    'tool_model': self.tool_model, 'available_models': [name for name in AVAILABLE_MODELS if name in names],
+                    'message': ('最近一次云端请求成功；不代表本次连接已验证。' if self.cloud_verified else '密钥已配置，尚未验证API；发送首条消息可验证。') if configured else '未配置密钥，请在本机运行云端启动脚本。'}
         try:
             names={item.get('name') for item in self.installed_models()}
             ready=model in names
@@ -89,7 +113,7 @@ class ChatServer(ThreadingHTTPServer):
         with self.locks_guard:
             return self.chat_locks.setdefault(chat, threading.Lock())
     def state(self, owner):
-        return {**self.store.state(owner), "privacy": WEB_PRIVACY}
+        return {**self.store.state(owner), "privacy": self.privacy}
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
@@ -102,7 +126,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         if cookie:
-            self.send_header("Set-Cookie", f"orvyth_session={cookie}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000")
+            self.send_header("Set-Cookie", f"{self.server.cookie_name}={cookie}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000")
     def json_response(self, status, payload, cookie=None):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.headers_for(status, "application/json; charset=utf-8", cookie)
@@ -120,7 +144,7 @@ class Handler(BaseHTTPRequestHandler):
             cookie.load(self.headers.get("Cookie", ""))
         except CookieError:
             pass
-        for name in ("orvyth_session", "openagent_session"):
+        for name in ((self.server.cookie_name,) if is_cloud(self.server.model) else ("orvyth_session", "openagent_session")):
             item = cookie.get(name)
             if item:
                 token, owner = self.server.store.owner(item.value, False)
@@ -386,7 +410,7 @@ class Handler(BaseHTTPRequestHandler):
                     data = {**data, 'message': addressed(data.get('message', ''), profile.get('user_address', ''))}
                 self.wfile.write((json.dumps(data, ensure_ascii=False) + "\n").encode("utf-8"))
                 self.wfile.flush()
-            local = LocalChat(selected_model, system_prompt=WEB_PROMPT + preference_prompt(profile), privacy_notice=WEB_PRIVACY)
+            local = LocalChat(selected_model, system_prompt=WEB_PROMPT.replace(WEB_PRIVACY, self.server.privacy) + preference_prompt(profile), privacy_notice=self.server.privacy)
             local.memory_context = self.server.memory.prompt(owner,question)
             pet_name = self.server.store.state(owner)['profile'].get('pet_name') or '小白'
             local.display_name = pet_name
@@ -441,8 +465,10 @@ class Handler(BaseHTTPRequestHandler):
                 if tail:
                     answer.append(tail)
                     emit({'type':'delta','content':tail})
-                final = self.server.store.save_pair(owner, chat, question, "".join(answer), search_evidence=source)
-                emit({"type": "done", "chat_id": chat})
+                usage = {'provider': 'deepseek', 'model': selected_model.removeprefix('deepseek-cloud:'), **local.usage} if is_cloud(selected_model) and local.usage else None
+                final = self.server.store.save_pair(owner, chat, question, "".join(answer), search_evidence=source, usage=usage)
+                if is_cloud(selected_model): self.server.cloud_verified = True
+                emit({"type": "done", "chat_id": chat, **({"usage": usage} if usage else {})})
             except (RuntimeError, ValueError, sqlite3.Error) as error:
                 emit({"type": "error", "message": str(error) if not isinstance(error, sqlite3.Error) else "回答未能保存，请稍后重试。"})
             finally:
