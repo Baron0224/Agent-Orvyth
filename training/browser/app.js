@@ -432,3 +432,26 @@ function selectPetDraft(kind){
 $('#choose-pet').addEventListener('click',()=>$('#pet-choice-dialog').showModal());
 $('#pet-choice-close').addEventListener('click',()=>$('#pet-choice-dialog').close());
 document.querySelectorAll('[data-pet-kind]').forEach(card=>card.addEventListener('click',()=>{selectPetDraft(card.dataset.petKind);$('#pet-choice-dialog').close();}));
+
+/* Explicit, account-scoped memory management; no client-side personal profile storage. */
+let memoryEditing=null, memoryBusy=false;
+const memoryCategories={personal:'个人资料',preference:'回答偏好',habit:'长期习惯',other:'其他／待整理'};
+function resetMemoryForm(){memoryEditing=null;$('#memory-content').value='';$('#memory-category').value='other';$('#memory-save').textContent='添加记忆';$('#memory-cancel').hidden=true;}
+function renderMemories(entries){
+ const list=$('#memory-list');list.replaceChildren();$('#memory-clear').disabled=!entries.length;
+ if(!entries.length){const empty=document.createElement('p');empty.textContent='还没有长期档案。你可以在这里添加，或在聊天中明确说“记住：……” 。';list.append(empty);return;}
+ for(const item of entries){const card=document.createElement('section');card.className='memory-entry';const label=document.createElement('strong');label.textContent=memoryCategories[item.category]||memoryCategories.other;const content=document.createElement('p');content.className='memory-content';content.textContent=item.content;const meta=document.createElement('small');const date=item.updated_at?new Date(item.updated_at):null;meta.textContent=({legacy:'旧记忆原文',explicit_chat:'聊天中明确保存',settings:'设置中手动保存'}[item.source]||'已保存记录')+' · '+(date&&!Number.isNaN(date.getTime())?date.toLocaleString():'旧记录未记录时间');const actions=document.createElement('div');actions.className='memory-actions';
+ const edit=document.createElement('button');edit.type='button';edit.textContent='编辑';edit.addEventListener('click',()=>{memoryEditing=item.id;$('#memory-content').value=item.content;$('#memory-category').value=item.category;$('#memory-save').textContent='保存编辑';$('#memory-cancel').hidden=false;$('#memory-form').scrollIntoView({block:'nearest'});$('#memory-content').focus();});
+ const remove=document.createElement('button');remove.type='button';remove.textContent='删除';remove.addEventListener('click',async()=>{if(await confirmAction('删除这条记忆？','删除长期档案不会删除旧聊天内容。'))memoryChange({action:'delete',id:item.id});});actions.append(edit,remove);card.append(label,content,meta,actions);list.append(card);
+ }
+}
+async function loadMemories(){if(memoryBusy)return;$('#memory-status').textContent='正在读取…';try{const data=await requestJSON('/api/memory');renderMemories(data.entries);$('#memory-status').textContent='仅当前本机账户可见。';}catch(error){$('#memory-status').textContent=error.message;}}
+async function memoryChange(payload){
+ if(memoryBusy)return;memoryBusy=true;const buttons=Array.from($('#memory-dialog').querySelectorAll('button'));buttons.forEach(b=>b.disabled=true);
+ try{const data=await requestJSON('/api/memory',payload);resetMemoryForm();renderMemories(data.entries);$('#memory-status').textContent='已保存。更改用于后续回答；旧聊天原消息不变。';}
+ catch(error){$('#memory-status').textContent=error.message;}
+ finally{memoryBusy=false;buttons.forEach(b=>b.disabled=false);$('#memory-clear').disabled=!$('#memory-list .memory-entry');}
+}
+$('#manage-memory').addEventListener('click',()=>{resetMemoryForm();$('#memory-dialog').showModal();loadMemories();});$('#memory-close').addEventListener('click',()=>$('#memory-dialog').close());$('#memory-reload').addEventListener('click',loadMemories);$('#memory-cancel').addEventListener('click',resetMemoryForm);
+$('#memory-form').addEventListener('submit',event=>{event.preventDefault();memoryChange({action:memoryEditing?'edit':'add',id:memoryEditing,category:$('#memory-category').value,content:$('#memory-content').value});});
+$('#memory-clear').addEventListener('click',async()=>{if(await confirmAction('清空长期档案？','只清空当前账户的长期记忆，不能在页面撤销。旧聊天仍保留。'))memoryChange({action:'clear',confirmed:true});});

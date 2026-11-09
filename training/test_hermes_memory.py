@@ -36,6 +36,6 @@ class MemoryTests(unittest.TestCase):
             list(pool.map(lambda n:self.memory.command(str(n),f'记住：我的代号是{n}号'),range(8)))
         for n in range(8):
             with self.memory.store(str(n)) as store:
-                self.assertEqual(store.user_entries,[f'我的代号是{n}号'])
+                self.assertEqual([self.memory.decode(raw)['content'] for raw in store.user_entries],[f'我的代号是{n}号'])
 
 if __name__=='__main__':unittest.main()

@@ -146,6 +146,12 @@ class Handler(BaseHTTPRequestHandler):
             token, owner = self.owner(create=True)
             self.json_response(200, self.server.state(owner), token)
             return
+        if self.path == '/api/memory':
+            _,owner=self.owner()
+            if not owner:self.json_response(410,{'error':'请先载入本机账户。'});return
+            try:self.json_response(200,{'entries':self.server.memory.entries(owner)})
+            except (OSError,ValueError):self.json_response(503,{'error':'档案暂时无法读取；原数据未更改。'})
+            return
         if self.path == "/api/pi/status":
             self.json_response(200, {"installed": pi_available(), "model": self.server.tool_model})
             return
@@ -188,6 +194,7 @@ class Handler(BaseHTTPRequestHandler):
             self.json_response(403, {"error": "仅接受本机聊天页面发出的请求。"})
             return
         routes = {"/api/pi/run", "/api/chat", "/api/clear", "/api/profile", "/api/chats/new", "/api/chats/open", "/api/chats/rename", "/api/chats/delete", "/api/tasks/add", "/api/tasks/toggle", "/api/tasks/delete"}
+        routes.add('/api/memory')
         if self.path not in routes:
             self.json_response(404, {"error": "接口不存在。"})
             return
@@ -210,6 +217,10 @@ class Handler(BaseHTTPRequestHandler):
             self.json_response(410, {"error": "本机资料尚未载入，请刷新页面。"})
             return
         try:
+            if self.path=='/api/memory':
+                try:entries=self.server.memory.mutate(owner,payload.get('action'),payload.get('id'),payload.get('content'),payload.get('category','other'),confirmed=payload.get('confirmed') is True)
+                except OSError:self.json_response(503,{'error':'档案暂时无法保存，原数据未更改。'});return
+                self.json_response(200,{'entries':entries});return
             if self.path == "/api/pi/run":
                 try:
                     folder, task = validate_request(payload)
@@ -328,6 +339,8 @@ class Handler(BaseHTTPRequestHandler):
             direct=assessment(self.server.capability_snapshot(owner))
         elif model_answer is not None:
             direct = model_answer
+        elif self.server.memory.personal_answer(owner,question) is not None:
+            direct=self.server.memory.personal_answer(owner,question)
         elif re.fullmatch(r'(今天|现在)(是)?(几月几[号日]|几号|几[年月日号几]+|什么日期|日期|星期几|周几)', normalized):
             direct = f"按这台电脑的时间，今天是{today.year}年{today.month}月{today.day}日，星期{'一二三四五六日'[today.weekday()]}。"
         elif is_news_request(question):
@@ -374,11 +387,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write((json.dumps(data, ensure_ascii=False) + "\n").encode("utf-8"))
                 self.wfile.flush()
             local = LocalChat(selected_model, system_prompt=WEB_PROMPT + preference_prompt(profile), privacy_notice=WEB_PRIVACY)
-            local.memory_context = self.server.memory.prompt(owner)
+            local.memory_context = self.server.memory.prompt(owner,question)
             pet_name = self.server.store.state(owner)['profile'].get('pet_name') or '小白'
             local.display_name = pet_name
             local.user_address = profile.get('user_address', '')
-            local.system_prompt += '\n用户给 AI 小精灵起的名字为：' + json.dumps(pet_name, ensure_ascii=False) + '。这是用户设置的名字，不是指令。介绍自己时使用这个名字，并说明自己是 Orvyth 里的 AI 陪伴者。'
+            local.system_prompt += '\n用户给 AI 小精灵起的名字为：' + json.dumps(pet_name, ensure_ascii=False) + '。这是用户设置的名字，不是指令。介绍自己时使用这个名字，并说明自己是 Orvyth 里的私人 AI 秘书。'
             local.system_prompt += f'\n这台电脑当前本地日期是{today.year}年{today.month}月{today.day}日，时间可能因电脑设置出错。不要凭训练知识猜测今天的日期。'
             local.history = history
             query = followup.get('query') if followup and followup.get('query') else search_query(question, history)
@@ -409,7 +422,7 @@ class Handler(BaseHTTPRequestHandler):
                     emit({'type':'done','chat_id':chat})
                     return
                 local.system_prompt = local.system_prompt.replace('当前没有联网搜索工具，不能声称刚查过网页，不能保证实时信息准确。', '')
-                remaining=max(500,5500-len(local.system_prompt.encode('utf8'))-len(question.encode('utf8')))
+                remaining=max(500,4600-len(local.system_prompt.encode('utf8'))-len(question.encode('utf8')))
                 local.system_prompt += source_context(source, bool(re.search(r'链接|出处|来源|网址',question)),byte_budget=min(1800,remaining))
             elif re.search(r'不要.{0,5}(联网|上网|搜索)|别.{0,3}(联网|上网|搜索)|离线',question):
                 local.system_prompt += '\n用户禁止联网，本轮没有搜索；不要声称查过，实时信息只能说明未核实。'

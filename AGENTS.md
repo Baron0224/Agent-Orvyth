@@ -63,3 +63,7 @@ Dify is an open-source platform for building LLM applications, agentic workflows
 - Run backend commands through `uv run --project api <command>`.
 - Backend integration tests are CI-only and are not expected to run locally.
 - Keep `docker/.env.example` limited to variables required for a default Docker Compose deployment to start. Put optional and provider-specific settings in the matching `docker/envs/*.env.example` file; `docker/.env` overrides those service-specific env files.
+
+## Orvyth 固定产品身份与口吻
+
+`training/PERSONA.md` 是实际运行时共用的身份与表达来源，终端、网页和新旧聊天都应遵守。维护时保留私人AI秘书身份、热恋期般宠溺简洁的表达、不自我贬低与不会不编的要求；事实、权限和执行结果仍须如实说明，不把这套语气当作伪称人类或隐藏服务失败的许可。未经用户新指示，不另加相冲突的人格提示。
