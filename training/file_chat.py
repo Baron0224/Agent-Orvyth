@@ -24,6 +24,11 @@ def natural_location(question):
     return match[1].upper()+':\\'+rest if rest else None
 
 def file_request(question, history, context=None):
+    last=history[-1].get('content','') if history and history[-1].get('role')=='assistant' else ''
+    waiting=any(message in last for message in (ASK_PATH,PROJECT_LOCATION,PROJECT_LOCAL,PROJECT_WEB,'我没找到这个文件或文件夹。'))
+    continuation=bool(natural_location(question) or re.search(r'[A-Za-z]:[\\/]|https?://|^["“`]?/|[\w-]+\.[a-zA-Z0-9]{1,8}\b',question) or re.fullmatch(r'\s*(?:对|是|是的|本地|电脑里|文件夹|网站|网页|网上|[A-Za-z]盘)[。！!\s]*',question))
+    if waiting and not local_intent(question) and not continuation:
+        return None
     if re.search(r'网上|联网|网站|网页|https?://',question) and not re.search(r'本地|电脑|[A-Za-z]:[\\/]',question):
         return None
     located=locate_project(question,history,context)
@@ -50,8 +55,7 @@ def file_request(question, history, context=None):
             if entry.get('role')=='user' and local_intent(entry.get('content','')):
                 source_question=entry['content'];break
         if source_question: question='"'+location+'"'
-    pending = bool(history and history[-1].get('role') == 'assistant' and
-                   (history[-1].get('content') == ASK_PATH or history[-1].get('content','').startswith('我没找到这个文件或文件夹。')))
+    pending = waiting and continuation
     choices = history[-1].get('content','') if history and history[-1].get('role')=='assistant' else ''
     choosing = choices.startswith('找到几个可能的文件或项目')
     pending = pending or bool(source_question) or awaiting_location

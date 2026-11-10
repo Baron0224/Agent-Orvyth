@@ -137,8 +137,8 @@ class Store:
     def history(self, owner, chat):
         with self.connect() as db:
             self.require_chat(db, owner, chat)
-            rows = db.execute("SELECT role,content FROM messages WHERE chat=? ORDER BY id DESC LIMIT 16", (chat,)).fetchall()
-            return [dict(row) for row in reversed(rows)]
+            rows = db.execute("SELECT role,content,search_evidence FROM messages WHERE chat=? ORDER BY id DESC LIMIT 16", (chat,)).fetchall()
+            return [{'role':row['role'],'content':'[此前在本机查看了个人档案，原文不发送给模型。]' if row['search_evidence'] and json.loads(row['search_evidence']).get('local_only') else row['content']} for row in reversed(rows)]
 
     def latest_search_evidence(self, owner, chat):
         """Only the immediately preceding assistant reply, in this owner's chat."""
@@ -185,7 +185,7 @@ class Store:
         with self.connect() as db:
             row = self.require_chat(db, owner, chat)
             address = json.loads(db.execute("SELECT profile FROM owners WHERE id=?", (owner,)).fetchone()["profile"]).get("user_address", "")
-            answer = addressed(answer, address)
+            answer = ((address + "，" if address else "") + answer) if search_evidence and search_evidence.get("local_only") else addressed(answer, address)
             db.executemany("INSERT INTO messages(chat,role,content) VALUES (?,?,?)", [
                 (chat, "user", question), (chat, "assistant", answer)])
             if usage:

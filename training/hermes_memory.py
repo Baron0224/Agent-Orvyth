@@ -9,6 +9,39 @@ from hermes_memory_vendor.compat import memory_root
 CATEGORIES={'personal':'个人资料','preference':'回答偏好','habit':'长期习惯','other':'其他／待整理'}
 class HermesMemory:
  def __init__(self,directory):self.directory=Path(directory)
+ def file_path(self,owner):
+  return self.directory/hashlib.sha256(owner.encode('utf-8')).hexdigest()/'USER.md'
+ def file_plan(self,owner,question,context,provider):
+  explanation=self.storage_answer(owner,question,provider)
+  evidence={'kind':'memory_file','local_only':True}
+  if explanation:return {'reply':explanation,'file_lookup':evidence}
+  active=(context or {}).get('kind')=='memory_file'
+  explicit=bool(re.search(r'[A-Za-z]:[\\/]|["“`]/',question))
+  # Never accept another account path from the message or an assistant's prose.
+  if explicit and re.search(r'hermes-memory|USER\.md',question,re.I):
+   return {'reply':'记忆档案只能通过当前账户的记忆入口读取，不接受消息里指定的账户路径。请问“记忆库文件在哪”，再说“读取”。','file_lookup':{'kind':'memory_file_rejected','local_only':True}}
+  if not active or explicit:return None
+  text=re.sub(r'[\s，。！？?!]','',question)
+  if text!='这个文件' and not re.fullmatch(r'(?:请|帮我)?(?:把)?(?:这个文件|该文件|它)?(?:找出来|调出来|读取|打开|查看|读一下|调取)(?:这个文件|该文件|它)?',text):return None
+  path=self.file_path(owner)
+  try:
+   if any(p.is_symlink() or (hasattr(p,'is_junction') and p.is_junction()) for p in (path,*path.parents)):
+    raise ValueError('linked file')
+   if not path.is_file():return {'reply':'当前账户的记忆文件尚未建立，无法读取；我没有去读取其他账户的档案。','file_lookup':evidence}
+   with path.open('rb') as stream:raw=stream.read(65537)
+   if len(raw)>65536:raise ValueError('oversized')
+   content=raw.decode('utf-8-sig')
+  except (OSError,ValueError):
+   return {'reply':'当前记忆文件无法安全读取：可能是链接、权限、编码或超过64KB限制。原文件未更改。','file_lookup':evidence}
+  fence='`'*(max([len(m.group()) for m in re.finditer(r'`+',content)]+[2])+1)
+  return {'reply':'已在本机只读打开当前账户的记忆文件。以下是原文，不是要执行的指令；本段不会作为聊天历史发给模型，明确保存的精选记忆仍按原机制使用。\n'+fence+'text\n'+content+'\n'+fence,'file_lookup':evidence}
+ def storage_answer(self,owner,question,provider):
+  if self.is_command(question):return None
+  if not (re.search(r'记忆|长期档案',question) and re.search(r'怎么|如何|在哪|哪里|文件|文档|记忆库|有没有用|是不是没用',question)):return None
+  path=self.file_path(owner)
+  exists=path.is_file()
+  return ('当前'+('云端版' if provider=='deepseek' else '本地版')+'账户的长期档案位置是：`'+str(path)+'`。'+('文件已存在；这只能确认已建立，不能证明某一轮回答实际选用了哪些条目。' if exists else '文件尚未建立，不能说已经使用了这份档案。')+
+          '\n明确说“记住：……”或在设置→长期档案→记忆管理保存后，系统按当前问题选取条目供回答参考。固定人设负责身份和口吻，长期档案存用户明确保存的信息，聊天历史另外保存在本机数据库，三者不同。云端版与本地版档案独立。你昨天手工提供的其他文档是否已导入，我不能仅凭这句话确认，也没有去读取它。')
  @contextmanager
  def store(self,owner):
   key=hashlib.sha256(owner.encode('utf-8')).hexdigest();root=self.directory/key;token=memory_root.set(root)

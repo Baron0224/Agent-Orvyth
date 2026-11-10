@@ -320,6 +320,17 @@ class Handler(BaseHTTPRequestHandler):
     def stream_reply(self, owner, chat, payload):
         question = Store.text(payload.get("message"), 2000, "消息")
         history = self.server.store.history(owner, chat)
+        profile = self.server.store.state(owner)['profile']
+        memory_file = self.server.memory.file_plan(owner,question,self.server.store.latest_search_evidence(owner,chat),self.server.provider)
+        if memory_file:
+            self.stream_file_chat(owner,chat,question,memory_file)
+            return
+        direct = role_info(question,profile.get('pet_name') or '小白',profile.get('user_address',''))
+        if re.fullmatch(r'[？?\s]+',question):
+            direct='你想让我解释上一条的哪一点？我先不继续查找文件。'
+        if direct:
+            self.stream_file_chat(owner,chat,question,{'reply':direct})
+            return
         if self.server.memory.is_command(question):
             self.stream_file_chat(owner, chat, question, {'memory': question})
             return
