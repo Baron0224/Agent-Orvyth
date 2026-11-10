@@ -138,7 +138,7 @@ class Store:
         with self.connect() as db:
             self.require_chat(db, owner, chat)
             rows = db.execute("SELECT role,content,search_evidence FROM messages WHERE chat=? ORDER BY id DESC LIMIT 16", (chat,)).fetchall()
-            return [{'role':row['role'],'content':'[此前在本机查看了个人档案，原文不发送给模型。]' if row['search_evidence'] and json.loads(row['search_evidence']).get('local_only') else row['content']} for row in reversed(rows)]
+            return [{'role':row['role'],'content':'[本机档案展示成功；全文不发给模型，个人事实应另从当前账户档案检索。]' if row['search_evidence'] and json.loads(row['search_evidence']).get('local_only') else row['content']} for row in reversed(rows)]
 
     def latest_search_evidence(self, owner, chat):
         """Only the immediately preceding assistant reply, in this owner's chat."""
@@ -146,6 +146,13 @@ class Store:
             self.require_chat(db, owner, chat)
             row = db.execute("SELECT search_evidence FROM messages WHERE chat=? AND role='assistant' ORDER BY id DESC LIMIT 1", (chat,)).fetchone()
             return json.loads(row[0]) if row and row[0] else None
+
+    def latest_local_task(self, owner, chat):
+        """Called only by local 8775; keep explicit task state across intervening chat."""
+        with self.connect() as db:
+            self.require_chat(db, owner, chat)
+            row = db.execute("SELECT search_evidence FROM messages WHERE chat=? AND role='assistant' AND json_extract(search_evidence,'$.local_task.version')=1 ORDER BY id DESC LIMIT 1", (chat,)).fetchone()
+            return json.loads(row[0]) if row else None
 
     def candidate_record(self,owner,chat,message=None):
         with self.connect() as db:

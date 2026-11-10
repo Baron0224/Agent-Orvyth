@@ -17,12 +17,20 @@ class HermesMemory:
   if explanation:return {'reply':explanation,'file_lookup':evidence}
   active=(context or {}).get('kind')=='memory_file'
   explicit=bool(re.search(r'[A-Za-z]:[\\/]|["“`]/',question))
-  # Never accept another account path from the message or an assistant's prose.
+  own_explicit=False
   if explicit and re.search(r'hermes-memory|USER\.md',question,re.I):
-   return {'reply':'记忆档案只能通过当前账户的记忆入口读取，不接受消息里指定的账户路径。请问“记忆库文件在哪”，再说“读取”。','file_lookup':{'kind':'memory_file_rejected','local_only':True}}
-  if not active or explicit:return None
+   quoted=re.findall(r'["“`]([^"”`]+)["”`]',question)
+   candidate=next((v for v in quoted if re.match(r'[A-Za-z]:[\\/]|/',v)),None)
+   if candidate is None:
+    match=re.search(r'[A-Za-z]:[\\/].*?USER\.md',question,re.I)
+    candidate=match[0] if match else ''
+   try:own_explicit=bool(candidate) and Path(candidate).resolve()==self.file_path(owner).resolve()
+   except (OSError,ValueError):pass
+   if not own_explicit:return {'reply':'不接受其他账户的记忆文件路径，只能读取当前账户自己的档案。','file_lookup':{'kind':'memory_file_rejected','local_only':True}}
+  if not own_explicit and (not active or explicit):return None
   text=re.sub(r'[\s，。！？?!]','',question)
-  if text!='这个文件' and not re.fullmatch(r'(?:请|帮我)?(?:把)?(?:这个文件|该文件|它)?(?:找出来|调出来|读取|打开|查看|读一下|调取)(?:这个文件|该文件|它)?',text):return None
+  referring=text in ('这个文件','就是上面这个文件','上面这个文件','那你调取出来','那你调出来') or bool(re.fullmatch(r'(?:请|帮我)?(?:把)?(?:这个文件|该文件|它|他)?(?:找出来|调出来|读取|打开|查看|读一下|调取)(?:这个文件|该文件|它|他)?',text))
+  if not own_explicit and not referring:return None
   path=self.file_path(owner)
   try:
    if any(p.is_symlink() or (hasattr(p,'is_junction') and p.is_junction()) for p in (path,*path.parents)):
@@ -122,7 +130,36 @@ class HermesMemory:
  def is_command(self,question):return any(self.commands(question)) or bool(re.fullmatch(r'(?:修改|更新|纠正)记忆第?\d+条?[：:].+',question,re.S))
  @staticmethod
  def personal_question(question):return bool(re.search(r'你.{0,4}记得|还记得|我喜欢|我叫什么|我的(?:名字|称呼|偏好|习惯|项目|代号)',question))
- def personal_answer(self,owner,question):
+ @staticmethod
+ def fact_topic(question):
+  if not re.search(r'我|本人|档案|还记得',question):return None
+  if re.search(r'姓名|真实.{0,3}(?:名|名字)|我叫(?:什么|啥)|我的?名字',question):return 'name'
+  if re.search(r'上学|学校|就读|学院|大学',question):return 'school'
+  if re.search(r'生日|出生|几几年',question):return 'birth'
+  return None
+ def personal_answer(self,owner,question,address=''):
+  declaration=re.fullmatch(r'我叫([^，。？！?\n]{1,24})[。！!]? ',question.strip()+' ')
+  if declaration and not re.search(r'什么|啥|吗|名字|姓名',declaration[1]):return '这轮我会按你说的名字称呼你：'+declaration[1]+'。这还没有保存到长期档案；需要长期保存时请明确说“记住：……”。'
+  topic=self.fact_topic(question)
+  if topic:
+   try:items=self.entries(owner)
+   except (OSError,ValueError):return '当前账户档案暂时无法读取，这次不能确认个人信息。'
+   patterns={'name':r'我叫|姓名|名字','school':r'学校|学院|大学|就读','birth':r'生日|出生|(?:19|20)\d{2}[.年/-]\d{1,2}'}
+   records=[i['content'] for i in items if re.search(patterns[topic],i['content'])]
+   suffix=(' 当前设置的称呼是'+address+'，它与真实姓名是两回事。') if topic=='name' and address else ''
+   if not records:return '当前账户档案中没有找到能确认这项个人信息的记录；这不代表之前本机展示失败。'+suffix
+   if topic=='birth' and not any(re.search(r'生日|出生',text) for text in records):
+    return '档案里有相关原记录：\n'+'\n'.join(records[:6])+'\n其中日期没有标明用途，不能直接认作生日。这个日期是生日还是其他日期？'
+   if topic=='name':
+    names=[]
+    for text in records:
+     match=re.search(r'(?:我叫|我的名字是|(?:真实)?姓名[：:是])([^，。；;\n]+)',text)
+     if match and not re.search(r'学院|大学|学校|学生|年级|大[一二三四]|\d',match[1]):names.append(match[1].strip())
+    if names and len(set(names))==1:return '档案中明确记录的姓名是'+names[0]+'。来源原文：'+records[0]+suffix
+   if topic=='birth' and re.search(r'年份|哪年|几几年|出生年',question):
+    years={m[1] for text in records for m in re.finditer(r'(?:生日|出生日期|出生)(?:是|为|于|[：:])?\s*((?:19|20)\d{2})(?:年|[./-])',text)}
+    if len(years)==1:return '按档案中明确标注的生日／出生日期，出生年份是'+next(iter(years))+'年。'
+   return '档案里记着：\n'+'\n'.join(records[:6])+'\n以上是保存的原记录；组合内容不能可靠拆成独立字段时，我不擅自补全。'+suffix
   if not re.search(r'你.{0,4}记得|还记得|我的.{0,12}(是什么|是什么来着|吗[？?]?$)',question):return None
   terms=self.terms(question);items=[]
   if re.search(r'名字|姓名',question):terms.update(('我叫','我的名字','我的姓名','姓名是'))

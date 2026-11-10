@@ -29,6 +29,7 @@ from urllib.parse import urlsplit,parse_qs
 from chat_stream import AddressStream
 from chat_preferences import addressed, prompt as preference_prompt
 from live_news import is_news_request, requested_day, login_next_step, evidence_answer, result_clarification, translate_saved_titles
+import local_web_tasks
 
 ASSETS = Path(__file__).with_name("browser")
 
@@ -321,11 +322,21 @@ class Handler(BaseHTTPRequestHandler):
         question = Store.text(payload.get("message"), 2000, "消息")
         history = self.server.store.history(owner, chat)
         profile = self.server.store.state(owner)['profile']
+        if local_web_tasks.enabled(self.server.provider, self.server.server_port):
+            personal = local_web_tasks.personal_reply(self.server.memory, owner, question)
+            if personal is not None:
+                self.stream_file_chat(owner, chat, question, {'reply': personal})
+                return
+            local_plan = local_web_tasks.route(question, self.server.store.latest_local_task(owner, chat))
+            if local_plan is not None:
+                self.stream_file_chat(owner, chat, question, local_plan)
+                return
         memory_file = self.server.memory.file_plan(owner,question,self.server.store.latest_search_evidence(owner,chat),self.server.provider)
         if memory_file:
             self.stream_file_chat(owner,chat,question,memory_file)
             return
-        direct = role_info(question,profile.get('pet_name') or '小白',profile.get('user_address',''))
+        direct = self.server.memory.personal_answer(owner,question,profile.get('user_address','')) if not self.server.memory.is_command(question) else None
+        direct = direct or role_info(question,profile.get('pet_name') or '小白',profile.get('user_address',''))
         if re.fullmatch(r'[？?\s]+',question):
             direct='你想让我解释上一条的哪一点？我先不继续查找文件。'
         if direct:
@@ -514,7 +525,10 @@ class Handler(BaseHTTPRequestHandler):
                     emit({'type':'files','items':cards(chat,message,evidence)})
             else:
                 trace=TaskTrace(emit)
-                if 'word_write' in plan:
+                if 'local_text_write' in plan:
+                    answer=local_web_tasks.create_text(plan['local_text_write'],on_step=trace.step)
+                    plan['file_lookup']['local_task']['phase']='completed'
+                elif 'word_write' in plan:
                     answer=create_word_file(plan['word_write'],on_step=trace.step)
                 elif 'write' in plan:
                     answer=create_text_file(plan['write'],on_step=trace.step)
@@ -533,7 +547,7 @@ class Handler(BaseHTTPRequestHandler):
                     answer=''.join(chunks)
                     trace.step('工具执行已结束，回答依据已读取的资料生成')
                 trace.finish('completed','执行检查通过')
-                answer=self.server.store.save_pair(owner,chat,question,answer,task_trace=trace.data)
+                answer=self.server.store.save_pair(owner,chat,question,answer,task_trace=trace.data,search_evidence=plan.get('file_lookup'))
                 emit({'type':'delta','content':answer})
             emit({'type':'done','chat_id':chat})
         except (RuntimeError,OSError,ValueError,sqlite3.Error) as error:
@@ -543,7 +557,11 @@ class Handler(BaseHTTPRequestHandler):
                 if trace:
                     trace.finish('failed',reason)
                     answer='任务未完成：'+reason
-                    answer=self.server.store.save_pair(owner,chat,question,answer,task_trace=trace.data)
+                    evidence=plan.get('file_lookup')
+                    if evidence and evidence.get('local_task'):
+                        evidence['local_task']['phase']='failed'
+                        evidence['local_task']['prompt']='上次执行失败：'+reason+'。没有重试或覆盖文件，请明确新的操作。'
+                    answer=self.server.store.save_pair(owner,chat,question,answer,task_trace=trace.data,search_evidence=evidence)
                     emit({'type':'delta','content':answer})
                     emit({'type':'done','chat_id':chat})
                 else:emit({'type':'error','message':reason})
