@@ -270,3 +270,21 @@ web/.vitest-reports/
 # dify-agent-runtime
 dify-agent-runtime/bin/
 dify-agent-runtime/.integration-state
+
+# 本地临时验收目录（测试库、截图、Edge 配置、CDP 脚本；不随仓库分发）
+.preview/
+# 浏览器配置/缓存目录（任何位置的 Edge/Chrome profile 都不入库）
+*-profile/
+*_profile/
+**/Cache/
+**/Code Cache/
+**/GPUCache/
+**/ScriptCache/
+**/extensions_crx_cache/
+**/BrowserMetrics*/
+**/Local Storage/
+**/Session Storage/
+# 本地数据库与数据目录
+*.sqlite3
+*.sqlite3-journal
+*.bundle
