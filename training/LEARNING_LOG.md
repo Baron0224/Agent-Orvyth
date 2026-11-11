@@ -535,3 +535,17 @@
 - 工具：Python 3 + 临时 HTTP 脚本；本机 Ollama `qwen3:8b`；DeepSeek 官方 API（`deepseek-flash`）；Windows netstat/taskkill；Git。无新依赖。
 - 一句话总结：DeepSeek 的“差”主要不是脑子差，是云端模式下本地文件分流被 provider 开关整体关掉了；纯聊天/拒答表现两边都合格，切回 qwen3:8b 已确认恢复。
 - 验证与状态：跑完已切回 `--model qwen3:8b` 并用默认数据目录重启 8775，`/api/status` 返回 `model/default_model/tool_model` 均为 qwen3:8b、ready=true；用户真实账户未被写入（对比全程用临时数据目录）；桌面 `orvyth测试.txt` 已按原内容恢复；未提交、未推 GitHub、未上线。
+
+## [2026-11-11] 本地工具与聊天模型解耦，8775 内可切换 qwen3:8b / deepseek-flash
+- 改了：`training/local_web_tasks.py:20-31` —— `enabled(provider, port)` 从“必须是 ollama 且 8775”改为“只要是 8775”，provider 参数保留兼容、不再参与判断。这就是上一轮模型对比里 DeepSeek 全部失手的根因：本地分流（事实写入/查询、建文件、找文件、完成判定）被绑在聊天模型上。
+- 改了：`training/chat_web.py` —— 新增 `ENGINES={'local':'qwen3:8b','deepseek':'deepseek-cloud:deepseek-flash'}`、`engine_of(owner)`、`chat_provider(owner)`、`ensure_cloud_key()`（密钥仍走本机 DPAPI，注入进程环境，不写盘不打印）、重写 `selected_model(owner=None)`（8775 按账户档案里的 `chat_engine` 选，取不到云端密钥就回落本机）；`runtime_status` 单出口并在 8775 附带 `engine`/`engine_model`；`file_plan` 与事实查询的 provider 改为按当前引擎计算；`:342` 旧的单主题 `personal_answer` 兜底在 8775 关闭，事实查询只剩一套统一实现。
+- 改了：`training/browser_store.py` —— 新增 `profile(owner)` 轻量读取；`save_profile` 接受并校验 `chat_engine`（`local`/`deepseek`），随账户档案一起持久化。
+- 改了：`training/file_lookup.py` —— 新增 `_shell_folder()` 用注册表 `User Shell Folders` 取真实的文档/桌面目录，`display_path()` 把系统文件夹显示为“文档”“桌面”（不再出现泰文 `เอกสาร`），`search_roots()` 恢复 `home/Documents` 根（真实简历在这里，之前被误删导致“找简历文件”答找不到）。
+- 改了：`training/project_lookup.py:104,109`、`training/local_web_tasks.py:333-337` —— 候选列表与“搜索范围”统一用 `display_path`；`training/browser/index.html:42` 设置里新增“聊天引擎”下拉，`training/browser/app.js:339,381` 回填与提交 `chat_engine`。
+- 改了：`training/test_engine_switch.py:1-140`（12 项）、`training/test_local_web_tasks.py:75-79`（enabled 断言）与 `:46-52`（“在桌面建 x.txt，里面写…”的新解析回归）、`training/test_chat_web.py:274`（profile 新增字段）。
+- 改了：`training/local_web_tasks.py:262-267` —— 验收时发现“在桌面建 orvyth测试.txt”这种不带“名为/叫”的说法匹配不到文件名，导致任务没进本地链、模型空口答“已创建”而磁盘没有文件；现在补了裸文件名兜底，并把裸“建”纳入创建动词。
+- 因为：总验收证明 DeepSeek 落后是接线问题不是模型问题；把“手”（本地工具）从“大脑”解耦后，两个引擎走同一套事实与文件逻辑。验收中又抓到一次“答复说建了、磁盘没有”的假完成，说明创建入口的解析必须覆盖自然说法，否则模型会替我们编造完成。
+- 我能改：`training/chat_web.py:79-83` 的 `ENGINES` 两档映射（换模型名改这里）；`training/browser/index.html:42` 与 `training/browser/app.js:339` 的引擎下拉文案；`training/local_web_tasks.py:20` 的启用端口；`training/file_lookup.py` 的 `display_path` 标签词。改完跑 `cd training && python -m unittest test_engine_switch test_local_web_tasks test_personal_write test_task_consistency test_project_lookup`。
+- 工具：Python 3 + unittest；本机 Ollama `qwen3:8b`；DeepSeek API（deepseek-flash，密钥来自本机 DPAPI）；Edge headless + CDP 截设置页；Git。无新依赖。
+- 一句话总结：现在不论用本机 qwen3:8b 还是云端 deepseek-flash，事实问答、建文件、找文件、完成判定都是同一套本地工具；设置里能直接切大脑，切完账户和档案不动，重启还保持上次选择。
+- 验证与状态：`test_engine_switch` 12 项、事实写入 7、完成判定 9、第一轮 16、local_web_tasks 6、project_lookup 5 全过；全量 `discover` 169 项 = 3 failures + 2 errors + 1 skipped，与基线同源（live_news 1、chat_web 2、hermes_web 1、reply_limits 1），无新增失败。真实 8775（隔离数据目录 `.preview/engine-data`，同一测试账户、同一份 2 条档案）：qwen3:8b 四组全过——事实双问答全（姓名+学校）、密码题拒答、发文件缺件追问、建桌面文件 completed 且磁盘 18 字节一致、找简历列出 3 个候选并选中第 2、继续沿用；杀进程重启后再问事实仍答全。切 deepseek-flash 同题全过（答复与 qwen 一致，因为走同一套本地工具），重启后 `engine=deepseek` 保持、事实仍答全；另发一条普通聊天验证云端通路，用量 prompt 938（缓存命中 256）/completion 19，合计 957 tokens，约 ¥0.001 量级。设置页截图确认“聊天引擎”下拉默认 qwen3:8b（本机，免费）、两项可选。桌面 `orvyth测试.txt` 已按原内容恢复；用户真实账户未写入（全程隔离目录）；8775 已用默认数据目录、qwen3:8b 重启。未推 GitHub、未上线。

@@ -21,6 +21,7 @@ from pi_bridge import available as pi_available, run_project, validate_request
 from file_chat import file_request
 from file_write import create_text_file
 from word_write import create_word_file
+from cloud_credentials import load_key
 from hermes_memory import HermesMemory
 from task_trace import TaskTrace
 from runtime_capabilities import assessment, is_self_assessment
@@ -49,6 +50,8 @@ WEB_PRIVACY = (
 )
 WEB_PROMPT = "\n".join(line for line in SYSTEM_PROMPT.splitlines() if not line.startswith((
     "当前问题和有限的对话历史", "退出本聊天程序", "关于保存或记录对话"))) + "\n" + WEB_PRIVACY
+
+ENGINES = {'local': 'qwen3:8b', 'deepseek': 'deepseek-cloud:deepseek-flash'}
 
 class ChatServer(ThreadingHTTPServer):
     daemon_threads = True
@@ -79,7 +82,35 @@ class ChatServer(ThreadingHTTPServer):
         self.locks_guard = threading.Lock()
         super().__init__(("127.0.0.1", port), Handler)
         self.origin = f"http://127.0.0.1:{self.server_port}"
-    def selected_model(self, owner):
+    def engine_of(self, owner):
+        try:
+            engine = self.store.profile(owner).get('chat_engine', 'local')
+        except (OSError, ValueError, sqlite3.Error, KeyError):
+            return 'local'
+        return engine if engine in ENGINES else 'local'
+
+    def ensure_cloud_key(self):
+        """Load the DPAPI key into this process only; never print or persist it."""
+        if os.environ.get('DEEPSEEK_API_KEY', '').strip():
+            return True
+        try:
+            key = load_key()
+        except (OSError, ValueError, KeyError):
+            return False
+        if not key:
+            return False
+        os.environ['DEEPSEEK_API_KEY'] = key
+        return True
+
+    def chat_provider(self, owner=None):
+        return 'deepseek' if is_cloud(self.selected_model(owner)) else 'ollama'
+
+    def selected_model(self, owner=None):
+        if self.server_port != 8775:
+            return self.model
+        engine = self.engine_of(owner) if owner else 'local'
+        if engine == 'deepseek' and self.ensure_cloud_key():
+            return ENGINES['deepseek']
         return self.model
 
     def installed_models(self):
@@ -89,20 +120,28 @@ class ChatServer(ThreadingHTTPServer):
 
     def runtime_status(self, owner=None):
         model=self.selected_model(owner) if owner else self.model
+        engine = self.engine_of(owner) if owner and self.server_port == 8775 else None
         if is_cloud(model):
             configured = bool(os.environ.get('DEEPSEEK_API_KEY', '').strip())
             try: names = {item.get('name') for item in self.installed_models()}
             except (OSError, ValueError, urllib.error.URLError): names = set()
-            return {'ready': configured, 'configured': configured, 'verified': self.cloud_verified,
+            status = {'ready': configured, 'configured': configured, 'verified': self.cloud_verified,
                     'provider': 'deepseek', 'model': model.removeprefix('deepseek-cloud:'),
                     'tool_model': self.tool_model, 'available_models': [name for name in AVAILABLE_MODELS if name in names],
                     'message': ('最近一次云端请求成功；不代表本次连接已验证。' if self.cloud_verified else '密钥已配置，尚未验证API；发送首条消息可验证。') if configured else '未配置密钥，请在本机运行云端启动脚本。'}
-        try:
-            names={item.get('name') for item in self.installed_models()}
-            ready=model in names
-            return {'ready':ready,'model':model,'default_model':self.model,'tool_model':self.tool_model,'available_models':[name for name in AVAILABLE_MODELS if name in names],'message':'可以聊天' if ready else '所选模型尚未安装，请在设置中选择已安装模型。'}
-        except (OSError,ValueError,urllib.error.URLError):
-            return {'ready':False,'model':model,'tool_model':self.tool_model,'available_models':[],'message':'请先打开 Ollama，再点检查连接。'}
+        else:
+            try:
+                names={item.get('name') for item in self.installed_models()}
+                ready=model in names
+                status={'ready':ready,'model':model,'default_model':self.model,'tool_model':self.tool_model,'available_models':[name for name in AVAILABLE_MODELS if name in names],'message':'可以聊天' if ready else '所选模型尚未安装，请在设置中选择已安装模型。'}
+            except (OSError,ValueError,urllib.error.URLError):
+                status={'ready':False,'model':model,'tool_model':self.tool_model,'available_models':[],'message':'请先打开 Ollama，再点检查连接。'}
+        if engine:
+            status['engine'] = engine
+            status['engine_model'] = ENGINES[engine]
+            if engine == 'deepseek' and not is_cloud(model):
+                status['message'] = '未找到云端密钥，已沿用本机模型。' + status.get('message', '')
+        return status
 
     def capability_snapshot(self, owner):
         status=self.runtime_status(owner)
@@ -335,11 +374,11 @@ class Handler(BaseHTTPRequestHandler):
             if local_plan is not None:
                 self.stream_file_chat(owner, chat, question, local_plan)
                 return
-        memory_file = self.server.memory.file_plan(owner,question,self.server.store.latest_search_evidence(owner,chat),self.server.provider)
+        memory_file = self.server.memory.file_plan(owner,question,self.server.store.latest_search_evidence(owner,chat),self.server.chat_provider(owner))
         if memory_file:
             self.stream_file_chat(owner,chat,question,memory_file)
             return
-        direct = self.server.memory.personal_answer(owner,question,profile.get('user_address','')) if not self.server.memory.is_command(question) else None
+        direct = self.server.memory.personal_answer(owner,question,profile.get('user_address','')) if self.server.server_port != 8775 and not self.server.memory.is_command(question) else None
         direct = direct or role_info(question,profile.get('pet_name') or '小白',profile.get('user_address',''))
         if re.fullmatch(r'[？?\s]+',question):
             direct='你想让我解释上一条的哪一点？我先不继续查找文件。'

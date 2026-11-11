@@ -1,7 +1,7 @@
 """个人项目按名称只读定位；状态只由当前账户的当前聊天传入。"""
 from pathlib import Path
 import re
-from file_lookup import find_matches, query_name, search_roots, normalize
+from file_lookup import display_path, find_matches, query_name, search_roots, normalize
 
 CONFIRM = r'^(对|是|是的|对是我的资料|是我的资料|对是我的|本地|电脑里|我找不到了你帮我找啊|我找不到了|找不到|帮我找|你帮我找|找一下|好|好的)[啊呀呢吧]*$'
 
@@ -101,12 +101,12 @@ def locate_project(question, history, context=None):
         hits=[p for p in hits if p.is_file() and p.suffix.lower() in {'.wav','.ogg','.mp3','.flac','.aac','.m4a','.wma','.opus'}]
     selected=sorted(set(hits if drawing or audio else hits or projects),key=str)
     state.update(paths=[str(p) for p in selected],status=scan['status'],roots=scan['roots'],match='approximate' if partial else 'exact' if hits else 'project')
-    scope='、'.join(scan['roots'])
+    scope='、'.join(display_path(p) for p in scan['roots'])
     if (drawing or audio) and projects and not selected:
         return {'reply':'找到项目目录，但未找到类型匹配的'+('图纸' if drawing else '音频')+'候选。只检查了名称和扩展名，没有读取内容；搜索可能受范围或时间限制。','file_lookup':state}
     if selected:
         label=('没找到完整名称“'+hint+'”，但找到近似名称候选，尚未确认是不是你要的：') if partial else ('找到名称匹配的图纸/demo候选：' if hits else ('找到项目目录，但没有找到名称匹配的“'+hint+'”：' if hint else '找到项目目录：'))
-        return {'reply':label+'\n'+'\n'.join(f'{i+1}. `{p}`' for i,p in enumerate(selected[:8]))+'\n只检查了名称和扩展名，未读取文件内容；目录和未知扩展名的用途待确认，同名文件未判断版本或正确性。搜索范围：'+scope+('。本次搜索达到限制或部分目录不可访问，结果可能不全。' if scan['status']=='limited' else '。'),'file_lookup':state}
+        return {'reply':label+'\n'+'\n'.join(f'{i+1}. `{display_path(p)}`' for i,p in enumerate(selected[:8]))+'\n只检查了名称和扩展名，未读取文件内容；目录和未知扩展名的用途待确认，同名文件未判断版本或正确性。搜索范围：'+scope+('。本次搜索达到限制或部分目录不可访问，结果可能不全。' if scan['status']=='limited' else '。'),'file_lookup':state}
     state['scope_requested']=True
     limitation='部分目录不可访问或本次搜索达到数量/时间限制，不能断言文件不存在。' if scan['status']=='limited' else '没有找到名称匹配的项目，不代表其他位置没有。'
     return {'reply':'已在这些允许的目录按项目名“'+name+'”查找：'+scope+'。'+limitation+'你只要补充下一步要查哪个盘或目录，不用先找出文件本身。','file_lookup':state}

@@ -7,7 +7,7 @@ from pathlib import Path
 import os
 import re
 
-from file_lookup import SKIP, normalize, search_roots
+from file_lookup import SKIP, display_path, normalize, search_roots
 from file_write import clean_name, create_text_file, desktop_folder
 from project_lookup import named_project
 
@@ -18,7 +18,13 @@ MAX_SECONDS = 3
 
 
 def enabled(provider, port):
-    return provider == 'ollama' and port == 8775
+    """The local work path belongs to the 8775 entry, not to one chat model.
+
+    ``provider`` stays in the signature because older callers pass it, but the
+    tools, fact memory and completion checks must behave the same whether the
+    chat brain is the local Ollama model or the DeepSeek cloud model.
+    """
+    return port == 8775
 
 
 LABELS = {'name': '姓名', 'school': '学校', 'personal': '个人资料'}
@@ -197,7 +203,7 @@ def route(question, context=None):
     short = re.sub(r'[\s，。？！?!]', '', question)
     paths = _quoted_paths(question)
     sending = bool(re.search(r'发给|发送给|传给|发过去|发送文件', question))
-    creating = bool(re.search(r'创建|新建|建立|建个|建一个|写个|写一个', question) and re.search(r'文件|文本|文档|\.txt', question))
+    creating = bool(re.search(r'创建|新建|建立|建个|建一个|建|写个|写一个', question) and re.search(r'文件|文本|文档|\.txt', question))
     finding = bool(re.search(r'查找|找一下|找找|找到|寻找|搜索|找', question) and re.search(r'文件|简历|\.png|\.txt|图片', question))
     if finding and named_project(question) and not (sending or creating):
         return None  # Existing project-scoped lookup owns its artifact/type parsing.
@@ -256,6 +262,10 @@ def route(question, context=None):
         name = re.search(r'(?:名字叫|命名为|名为|叫做|文件名(?:为|是)?|叫)[：:\s]*([^，,；;\n]+)', head)
         if name:
             slots['name'] = name[1].strip().strip('"“”`')
+        else:
+            token = re.search(r'([\w一-鿿()（）\-]+\.(?:txt|md|docx?|xlsx?|csv|py|json))', head)
+            if token:
+                slots['name'] = token[1].strip()
         if paths:
             if paths[0].suffix.lower() == '.txt':
                 slots.update(path=str(paths[0]), name=paths[0].name)
@@ -328,7 +338,7 @@ def _candidates(state, prefix):
     if selected is not None:
         text += '\n图片可使用下方预览；文本目前没有图片预览。可说“返回候选列表”。'
     else:
-        text += '\n请指定序号。搜索范围：' + '、'.join(state.get('roots', []))
+        text += '\n请指定序号。搜索范围：' + '、'.join(display_path(p) for p in state.get('roots', []))
     if state.get('status') == 'limited':
         text += '\n搜索达到限制或部分目录不可访问，候选可能不全。'
     return _reply(text, state)

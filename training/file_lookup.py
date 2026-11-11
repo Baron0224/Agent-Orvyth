@@ -18,17 +18,58 @@ def query_name(question):
     name = re.sub(r'^(?:请|帮我|替我|我想|能不能|调取|读取|查看|打开|找一下|看一下|读一下|总结|分析|我|文档里|文档中|桌面上|的)+', '', question)
     return re.split(r'中的|里的|的内容|的故事|，|。|？', name)[0].strip()
 
+def _shell_folder(name, fallback=None):
+    """Resolve a Windows known folder so localized names never leak into roots."""
+    if os.name == 'nt':
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                r'Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders') as key:
+                value = winreg.QueryValueEx(key, name)[0]
+            path = Path(os.path.expandvars(value))
+            if path.is_dir():
+                return path
+        except (OSError, ValueError, KeyError):
+            pass
+    return fallback if fallback is not None and fallback.is_dir() else None
+
+def display_path(path):
+    """Name a known folder in Chinese; other paths keep their real text."""
+    path = Path(path)
+    for name, label in (('Personal', '文档'), ('Desktop', '桌面')):
+        folder = _shell_folder(name)
+        if folder is None:
+            continue
+        try:
+            relative = path.resolve().relative_to(folder.resolve())
+        except (OSError, ValueError):
+            continue
+        return label if str(relative) == '.' else label + os.sep + str(relative)
+    return str(path)
+
+
 def search_roots():
     configured = os.environ.get('ORVYTH_FILE_ROOTS')
     if configured: return [Path(p) for p in configured.split(os.pathsep) if p.strip()]
     home = Path.home()
     project = Path(__file__).resolve().parents[1]
-    candidates = [home/'Documents', home/'Desktop', home/'桌面', project, project.parent]
+    candidates = [home/'Documents', _shell_folder('Personal'), _shell_folder('Desktop'),
+                  home/'Desktop', home/'桌面', project, project.parent]
     if os.name == 'nt':
         candidates.extend(Path(f'{drive}:/')/name for drive in 'CDEF' for name in ('codex','Projects'))
     for cloud in (home/'OneDrive',):
-        candidates.extend(cloud/name for name in ('Documents','文档','เอกสาร','Desktop','桌面'))
-    return [p for p in candidates if p.is_dir()]
+        if cloud.is_dir():
+            candidates.extend(cloud/name for name in ('Documents','Desktop','桌面'))
+    roots, seen = [], set()
+    for path in candidates:
+        if not path or not path.is_dir():
+            continue
+        key = str(path.resolve()).casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append(path)
+    return roots
 
 def find_matches(name, roots=None, seconds=3, limit=30000, details=False):
     key = normalize(name)

@@ -337,6 +337,7 @@ async function openSettings() {
   selectPetDraft(profile.pet_kind || 'dog');
   $('#name-input').value = profile.name; $('#pet-name-input').value = profile.pet_name; $('#motion-input').checked = profile.pet_motion;
   $('#address-input').value = profile.user_address || '';
+  $('#engine-input').value = profile.chat_engine === 'deepseek' ? 'deepseek' : 'local';
   paintAvatar($('#avatar-edit'), draftAvatar, profile.name); $('#settings-error').textContent = ''; $('#settings-dialog').showModal();
 
 }
@@ -379,7 +380,7 @@ $('#settings-form').noValidate = true;
 $('#settings-form').addEventListener('submit', async event => {
   event.preventDefault(); $('#settings-save').disabled = true; $('#settings-error').textContent = '';
   try {
-    const data = await requestJSON('/api/profile',{name:$('#name-input').value,pet_name:$('#pet-name-input').value,pet_motion:$('#motion-input').checked,pet_kind:$('#pet-kind-input').value,avatar:draftAvatar,user_address:$('#address-input').value});
+    const data = await requestJSON('/api/profile',{name:$('#name-input').value,pet_name:$('#pet-name-input').value,pet_motion:$('#motion-input').checked,pet_kind:$('#pet-kind-input').value,avatar:draftAvatar,user_address:$('#address-input').value,chat_engine:$('#engine-input').value});
     applyState(data); $('#settings-dialog').close(); await checkConnection(); setNotice('设置已保存在本机，后续回复将使用新设置。');
   } catch(error) { $('#settings-error').textContent = error.message; }
   finally { $('#settings-save').disabled = false; }

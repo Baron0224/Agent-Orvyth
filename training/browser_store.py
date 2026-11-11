@@ -214,6 +214,12 @@ class Store:
             raise ValueError(f"{label}请输入 1 到 {limit} 字。")
         return value.strip()
 
+    def profile(self, owner):
+        with self.connect() as db:
+            row = db.execute("SELECT profile FROM owners WHERE id=?", (owner,)).fetchone()
+            stored = json.loads(row["profile"])
+        return {**DEFAULTS, **{key: value for key, value in stored.items() if key not in RETIRED}}
+
     def save_profile(self, owner, payload):
         name = self.text(payload.get("name"), 24, "昵称")
         pet_name = self.text(payload.get("pet_name"), 16, "精灵名字")
@@ -222,6 +228,9 @@ class Store:
         kind = payload.get("pet_kind")
         if kind is not None and kind not in ("dog", "cat", "rabbit", "robot"):
             raise ValueError("请选择小狗、小猫、小兔子或小机器人。")
+        engine = payload.get("chat_engine")
+        if engine is not None and engine not in ("local", "deepseek"):
+            raise ValueError("请选择本机引擎或云端引擎。")
         if not isinstance(motion, bool) or not isinstance(avatar, str):
             raise ValueError("资料格式不正确。")
         if avatar:
@@ -244,6 +253,7 @@ class Store:
                 previous = db.execute("SELECT profile FROM owners WHERE id=?", (owner,)).fetchone()
                 kind = json.loads(previous["profile"]).get("pet_kind", "dog")
             profile["pet_kind"] = kind
+            profile["chat_engine"] = engine if engine is not None else old_profile.get("chat_engine", "local")
             db.execute("UPDATE owners SET profile=? WHERE id=?", (json.dumps(profile), owner))
 
     def task_action(self, owner, action, payload):

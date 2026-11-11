@@ -30,6 +30,13 @@ class LocalTasksTests(unittest.TestCase):
                 self.assertIn('文件名不能', tasks.route('在桌面建一个文件，名字叫 ../越界.txt，里面写x')['reply'])
                 self.assertNotIn('local_text_write', tasks.route('不要在桌面创建文件，名字叫x，内容是y'))
 
+    def test_create_with_bare_jian_and_bare_filename(self):
+        plan = tasks.route('在桌面建 x测试.txt，里面写内容', None)
+        self.assertIn('local_text_write', plan)
+        self.assertEqual(plan['local_text_write']['name'], 'x测试.txt')
+        self.assertEqual(plan['local_text_write']['content'], '内容')
+        self.assertEqual(plan['local_text_write']['path'], str((tasks.desktop_folder() / 'x测试.txt').resolve()))
+
     def test_candidates_short_fragment_selection_restart_and_owner(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -74,7 +81,8 @@ class LocalTasksTests(unittest.TestCase):
 
     def test_cloud_other_ports_terminal_keep_original_route(self):
         self.assertTrue(tasks.enabled('ollama', 8775))
-        for provider, port in [('deepseek', 8776), ('deepseek', 8775), ('ollama', 8776)]:
+        self.assertTrue(tasks.enabled('deepseek', 8775))
+        for provider, port in [('deepseek', 8776), ('ollama', 8776), ('ollama', 8765)]:
             self.assertFalse(tasks.enabled(provider, port))
         from file_write import write_request
         self.assertIn('请把文件名和内容', write_request('在桌面建一个测试文件，名字叫 orvyth测试.txt，里面写核心路径实测')['reply'])
