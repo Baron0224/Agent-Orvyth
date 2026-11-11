@@ -525,3 +525,13 @@
 - 工具：Python 3 + unittest；本机 Ollama `qwen3:8b` 的真实 8775 服务（`--data-dir` 指向临时目录，未碰默认账户数据库）；Windows `netstat`/`taskkill` 清掉占用端口的旧进程；Git。无新依赖、无付费 API。
 - 一句话总结：现在对小白说“我叫穆柏润，在大连东软信息学院上学，记住”，它会真写进当前账户档案并回你存了哪两条；问“我叫什么、在哪上学”能答对，重启后还在；问档案里没有的密码仍然答“没有记录”。
 - 验证与状态：`test_personal_write` 7 项全过；旧接续 `test_project_lookup` 5 项全过（原 ERROR 已消失）；完成判定 9 项 + 第一轮 16 项 + `test_local_web_tasks` 5 项 = 30 项全过；全量 `discover` 156 项 = 3 failures + 2 errors + 1 skipped，较基线 3F+3E+1S 少一个 error（project_lookup 已修），其余 5 项与基线同源（live_news 1、chat_web 2、hermes_web 1、reply_limits 1），无新增失败。真实 8775（临时数据目录、chat/tool 均 qwen3:8b）：首句写入 → 回复两条 [姓名]/[学校] 与“共 2 条记录”，`GET /api/memory` 返回两条 `source=explicit_chat`；同会话问“我叫什么，在哪上学” → “姓名：穆柏润／学校：大连东软信息学院”；杀进程重启后再问 → 仍答对；问“我的银行卡密码是什么” → 明确无记录、未带出姓名学校；“帮我存进长期记忆：…”在新账户同样写入两条。`git diff --check` 通过。未读取用户真实档案原文、未碰其他账户与云端、未推 GitHub、未上线。
+## [2026-11-11] 模型对比：同一批题在 qwen3:8b 与 DeepSeek deepseek-flash 下的表现
+- 改了：本轮不改业务代码。新增临时对比脚本 `.preview/model_compare.py`（同一隔离账户、同一份档案、每题记录答复/任务状态/失败原因/云端用量）、`.preview/compare-qwen2*.json`、`.preview/compare-deepseek2*.json`；测试数据目录 `.preview/compare-data/`。这些都在未跟踪的 `.preview/` 下，不进仓库。
+- 条件：同一入口 8775、同一测试账户（隔离数据库，密码/姓名/学校 2 条档案先由 `personal_write` 写入）、同一组题同一顺序、每题都在全新聊天里跑（第一版两边共用一个聊天导致 DeepSeek 从历史里捡到 Qwen 的候选清单，已作废重跑）；桌面测试文件两边开跑前都先移走，保证“新建”成立，跑完把用户原文件原样放回。
+- 结果（逐项）：①“我叫什么、在哪上学”：Qwen 答全（姓名+学校）；DeepSeek 只答姓名、未答学校——程序原因：`local_web_tasks.enabled()` 只对 `provider=='ollama'` 生效，走云端时 8775 本地分流整体关闭，退回到 `personal_answer`，而它只按 `fact_topic` 取单一主题（先匹配姓名就返回姓名）。①补“我的银行卡密码是什么”：两边都答无记录、不编造，通过。②“把那个文件发给龙哥”：两边都明确说没有发送工具、不能替他发出，Qwen 还追问文件和渠道，通过；差异只是措辞。③“在桌面建…orvyth测试.txt”：Qwen 真建出文件（18 字节“核心路径实测”，任务状态 completed，磁盘核对通过）；DeepSeek 反问“请把文件名和内容告诉我”，没建——程序原因：本地文件任务分流同样只在 ollama+8775 下开启。④“找简历文件→第二个→继续”：Qwen 列出 3 个候选、选中第 2 个、继续沿用选择；DeepSeek 全程要求用户给范围，未执行任何磁盘搜索——同一处程序原因。重启后续问①：两边都能从档案读回（Qwen 两条、DeepSeek 只有姓名）。
+- 差距归因：5 类里 3 类（③④及①的学校字段）是**程序开关**导致，不是模型能力差距；真正可比的只有②的措辞和①的查询回退路径。要让 DeepSeek 也能建文件/找文件，得把 `local_web_tasks.enabled()` 的 provider 限制放开（本轮按“只测不修”未动）。
+- 用量：本轮实际产生 8 次带用量的云端调用，合计 prompt 9517 tokens（缓存命中 6656、未命中 2861）、completion 330 tokens；按 DeepSeek 公开价目估算在 ¥0.01 量级（未联网核价，仅给量级）。密钥用本机 DPAPI 保存的那把，经 `cloud_credentials.load_key()` 注入进程环境，未写盘、未打印。
+- 我能改：`training/chat_web.py:93-99` 的云端就绪判断；`training/local_web_tasks.py:13-15` 的 `enabled()`（若要放开云端文件任务，改这里并补回归）；`training/hermes_memory.py:133-139` 的 `fact_topic`（若要让云端模式也一次答姓名+学校）。
+- 工具：Python 3 + 临时 HTTP 脚本；本机 Ollama `qwen3:8b`；DeepSeek 官方 API（`deepseek-flash`）；Windows netstat/taskkill；Git。无新依赖。
+- 一句话总结：DeepSeek 的“差”主要不是脑子差，是云端模式下本地文件分流被 provider 开关整体关掉了；纯聊天/拒答表现两边都合格，切回 qwen3:8b 已确认恢复。
+- 验证与状态：跑完已切回 `--model qwen3:8b` 并用默认数据目录重启 8775，`/api/status` 返回 `model/default_model/tool_model` 均为 qwen3:8b、ready=true；用户真实账户未被写入（对比全程用临时数据目录）；桌面 `orvyth测试.txt` 已按原内容恢复；未提交、未推 GitHub、未上线。
