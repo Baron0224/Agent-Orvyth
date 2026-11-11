@@ -29,6 +29,7 @@ from file_preview import cards, preview
 from urllib.parse import urlsplit,parse_qs
 from chat_stream import AddressStream
 from chat_preferences import addressed, prompt as preference_prompt
+import auto_router
 from live_news import is_news_request, requested_day, login_next_step, evidence_answer, result_clarification, translate_saved_titles
 import local_web_tasks
 
@@ -52,6 +53,18 @@ WEB_PROMPT = "\n".join(line for line in SYSTEM_PROMPT.splitlines() if not line.s
     "当前问题和有限的对话历史", "退出本聊天程序", "关于保存或记录对话"))) + "\n" + WEB_PRIVACY
 
 ENGINES = {'local': 'qwen3:8b', 'deepseek': 'deepseek-cloud:deepseek-flash'}
+ENGINE_CHOICES = ('auto', 'local', 'deepseek')
+TOOL_ENGINE = {'engine': 'local', 'model': '', 'reason': '', 'auto': False, 'label': '本机工具'}
+
+
+def engine_label(engine, model, reason=''):
+    if engine == 'deepseek':
+        base = '云端 deepseek-flash'
+    elif model:
+        base = '本机 ' + model
+    else:
+        base = '本机工具'
+    return base + (' · ' + reason if reason else '')
 
 class ChatServer(ThreadingHTTPServer):
     daemon_threads = True
@@ -84,10 +97,19 @@ class ChatServer(ThreadingHTTPServer):
         self.origin = f"http://127.0.0.1:{self.server_port}"
     def engine_of(self, owner):
         try:
-            engine = self.store.profile(owner).get('chat_engine', 'local')
+            engine = self.store.profile(owner).get('chat_engine', 'auto')
         except (OSError, ValueError, sqlite3.Error, KeyError):
-            return 'local'
-        return engine if engine in ENGINES else 'local'
+            return 'auto'
+        return engine if engine in ENGINE_CHOICES else 'auto'
+
+    def cloud_key_ready(self):
+        """Report whether a cloud key exists, without touching this process."""
+        if os.environ.get('DEEPSEEK_API_KEY', '').strip():
+            return True
+        try:
+            return bool(load_key())
+        except (OSError, ValueError, KeyError):
+            return False
 
     def ensure_cloud_key(self):
         """Load the DPAPI key into this process only; never print or persist it."""
@@ -105,13 +127,29 @@ class ChatServer(ThreadingHTTPServer):
     def chat_provider(self, owner=None):
         return 'deepseek' if is_cloud(self.selected_model(owner)) else 'ollama'
 
-    def selected_model(self, owner=None):
+    def route_for(self, owner, question=''):
+        """Pick this message's engine. Pure rules: never calls a model."""
         if self.server_port != 8775:
+            return {'engine': 'deepseek' if is_cloud(self.model) else 'local',
+                    'model': self.model, 'reason': '', 'auto': False}
+        engine = self.engine_of(owner)
+        if engine == 'local':
+            return {'engine': 'local', 'model': ENGINES['local'], 'reason': '', 'auto': False}
+        if engine == 'deepseek':
+            if self.cloud_key_ready():
+                return {'engine': 'deepseek', 'model': ENGINES['deepseek'], 'reason': '', 'auto': False}
+            return {'engine': 'local', 'model': ENGINES['local'], 'reason': '未找到云端密钥，已用本机模型', 'auto': False}
+        choice = auto_router.choose(question)
+        if choice['engine'] == 'deepseek':
+            if self.cloud_key_ready():
+                return {'engine': 'deepseek', 'model': ENGINES['deepseek'], 'reason': choice['reason'], 'auto': True}
+            return {'engine': 'local', 'model': ENGINES['local'], 'reason': '未找到云端密钥，已用本机模型', 'auto': True}
+        return {'engine': 'local', 'model': ENGINES['local'], 'reason': choice['reason'], 'auto': True}
+
+    def selected_model(self, owner=None, question=''):
+        if not owner:
             return self.model
-        engine = self.engine_of(owner) if owner else 'local'
-        if engine == 'deepseek' and self.ensure_cloud_key():
-            return ENGINES['deepseek']
-        return self.model
+        return self.route_for(owner, question)['model']
 
     def installed_models(self):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -138,8 +176,13 @@ class ChatServer(ThreadingHTTPServer):
                 status={'ready':False,'model':model,'tool_model':self.tool_model,'available_models':[],'message':'请先打开 Ollama，再点检查连接。'}
         if engine:
             status['engine'] = engine
-            status['engine_model'] = ENGINES[engine]
-            if engine == 'deepseek' and not is_cloud(model):
+            status['engine_model'] = ENGINES['local'] if engine == 'auto' else ENGINES[engine]
+            status['auto'] = engine == 'auto'
+            key_ready = self.cloud_key_ready()
+            status['cloud_key'] = key_ready
+            if engine == 'auto':
+                status['message'] = ('自动模式：简单问题用本机，复杂问题切云端。' if key_ready else '未找到云端密钥：自动模式将全部使用本机模型。') + status.get('message', '')
+            elif engine == 'deepseek' and not key_ready:
                 status['message'] = '未找到云端密钥，已沿用本机模型。' + status.get('message', '')
         return status
 
@@ -167,6 +210,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         if cookie:
             self.send_header("Set-Cookie", f"{self.server.cookie_name}={cookie}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000")
+    def engine_info_wanted(self):
+        return self.headers.get('X-Orvyth-Engine', '') == '1'
+
     def json_response(self, status, payload, cookie=None):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.headers_for(status, "application/json; charset=utf-8", cookie)
@@ -392,7 +438,8 @@ class Handler(BaseHTTPRequestHandler):
         if file_plan:
             self.stream_file_chat(owner, chat, question, file_plan)
             return
-        selected_model = self.server.selected_model(owner)
+        selected_route = self.server.route_for(owner, question)
+        selected_model = selected_route['model']
         profile = self.server.store.state(owner)["profile"]
         previous_source = self.server.store.latest_search_evidence(owner, chat)
         weather=weather_city(question,history,previous_source)
@@ -517,11 +564,19 @@ class Handler(BaseHTTPRequestHandler):
                 local.system_prompt += '\n用户禁止联网，本轮没有搜索；不要声称查过，实时信息只能说明未核实。'
             if selected_model.startswith("deepseek-r1"):
                 emit({"type":"status","message":"模型正在思考与生成，正文到达后会逐字显示。"})
-            stream = local.reply(question)
+            actual = {'engine': selected_route['engine'], 'model': selected_model,
+                      'reason': selected_route['reason'], 'auto': selected_route['auto']}
+            def publish(engine, model, reason, auto):
+                actual.update(engine=engine, model=model, reason=reason, auto=auto)
+                if self.engine_info_wanted():
+                    emit({'type': 'engine', **actual, 'label': engine_label(engine, model, reason)})
+            publish(actual['engine'], actual['model'], actual['reason'], actual['auto'])
+            if is_cloud(actual['model']): self.server.ensure_cloud_key()
+            base_prompt = local.system_prompt
             answer = []
             display = AddressStream(profile.get('user_address', ''))
-            try:
-                for content in stream:
+            def drain(text_stream):
+                for content in text_stream:
                     delta = display.feed(content)
                     if delta:
                         answer.append(delta)
@@ -530,14 +585,32 @@ class Handler(BaseHTTPRequestHandler):
                 if tail:
                     answer.append(tail)
                     emit({'type':'delta','content':tail})
-                usage = {'provider': 'deepseek', 'model': selected_model.removeprefix('deepseek-cloud:'), **local.usage} if is_cloud(selected_model) and local.usage else None
-                final = self.server.store.save_pair(owner, chat, question, "".join(answer), search_evidence=source, usage=usage)
-                if is_cloud(selected_model): self.server.cloud_verified = True
+            stream = None
+            try:
+                try:
+                    stream = local.reply(question)
+                    drain(stream)
+                except (RuntimeError, OSError, urllib.error.URLError) as error:
+                    if not (actual['auto'] and actual['engine'] == 'deepseek' and not answer):
+                        raise
+                    fallback = LocalChat(self.server.model, system_prompt=base_prompt, privacy_notice=self.server.privacy)
+                    fallback.memory_context = local.memory_context
+                    fallback.display_name = local.display_name
+                    fallback.user_address = local.user_address
+                    fallback.history = local.history
+                    publish('local', self.server.model, '云端调用失败，已改用本机模型：' + str(error)[:40], True)
+                    local = fallback
+                    stream = local.reply(question)
+                    drain(stream)
+                usage = {'provider': 'deepseek', 'model': actual['model'].removeprefix('deepseek-cloud:'), **local.usage} if is_cloud(actual['model']) and local.usage else None
+                final = self.server.store.save_pair(owner, chat, question, "".join(answer), search_evidence=source, usage=usage,
+                                                    engine={k: actual[k] for k in ('engine', 'model', 'reason', 'auto')})
+                if is_cloud(actual['model']): self.server.cloud_verified = True
                 emit({"type": "done", "chat_id": chat, **({"usage": usage} if usage else {})})
             except (RuntimeError, ValueError, sqlite3.Error) as error:
                 emit({"type": "error", "message": str(error) if not isinstance(error, sqlite3.Error) else "回答未能保存，请稍后重试。"})
             finally:
-                stream.close()
+                if stream: stream.close()
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
         except (OSError,ValueError,TypeError,RuntimeError):
@@ -559,12 +632,13 @@ class Handler(BaseHTTPRequestHandler):
                     event = {**event, 'message': addressed(event.get('message', ''), self.server.store.state(owner)['profile'].get('user_address', ''))}
                 self.wfile.write((json.dumps(event, ensure_ascii=False)+"\n").encode('utf-8'))
                 self.wfile.flush()
+            if self.engine_info_wanted(): emit({'type': 'engine', **TOOL_ENGINE})
             if 'memory' in plan or 'reply' in plan:
                 if plan.get('task_state')=='failed':
                     trace=TaskTrace(emit)
                     trace.finish('failed',plan.get('task_reason') or '要读取的内容没有取到，任务未完成。')
                 answer=self.server.memory.command(owner,plan['memory']) if 'memory' in plan else plan['reply']
-                answer=self.server.store.save_pair(owner,chat,question,answer,search_evidence=plan.get('file_lookup'),**({'task_trace':trace.data} if trace else {}))
+                answer=self.server.store.save_pair(owner,chat,question,answer,search_evidence=plan.get('file_lookup'),engine=TOOL_ENGINE,**({'task_trace':trace.data} if trace else {}))
                 emit({'type':'delta','content':answer})
                 if plan.get('file_lookup'):
                     message,evidence=self.server.store.candidate_record(owner,chat)
@@ -593,7 +667,7 @@ class Handler(BaseHTTPRequestHandler):
                     answer=trace.reconcile(''.join(chunks),plan.get('only_file'))
                     trace.step('工具执行已结束，回答依据已读取的资料生成')
                 trace.finish('completed','执行检查通过')
-                answer=self.server.store.save_pair(owner,chat,question,answer,task_trace=trace.data,search_evidence=plan.get('file_lookup'))
+                answer=self.server.store.save_pair(owner,chat,question,answer,task_trace=trace.data,search_evidence=plan.get('file_lookup'),engine=TOOL_ENGINE)
                 emit({'type':'delta','content':answer})
             emit({'type':'done','chat_id':chat})
         except (RuntimeError,OSError,ValueError,sqlite3.Error) as error:
@@ -607,7 +681,7 @@ class Handler(BaseHTTPRequestHandler):
                     if evidence and evidence.get('local_task'):
                         evidence['local_task']['phase']='failed'
                         evidence['local_task']['prompt']='上次执行失败：'+reason+'。没有重试或覆盖文件，请明确新的操作。'
-                    answer=self.server.store.save_pair(owner,chat,question,answer,task_trace=trace.data,search_evidence=evidence)
+                    answer=self.server.store.save_pair(owner,chat,question,answer,task_trace=trace.data,search_evidence=evidence,engine=TOOL_ENGINE)
                     emit({'type':'delta','content':answer})
                     emit({'type':'done','chat_id':chat})
                 else:emit({'type':'error','message':reason})

@@ -559,3 +559,16 @@
 - 工具：Python 3 + unittest；本机 Ollama `qwen3:8b` 的真实 8775 服务（隔离数据目录 `.preview/multiturn-data`）；Git。无新依赖、无付费 API。
 - 一句话总结：现在你说“在桌面创建一个文档写我爱你”，它只问文件名；你回“文档名字是你好内容我爱你”，它会立刻建出桌面的 `你好.txt`，内容就是“我爱你”，并把核对结果告诉你。
 - 验证与状态：`test_local_web_tasks` 9 项全过（含新增 3 项）；定向回归事实写入 7、完成判定 9、第一轮 16、project_lookup 5、引擎切换 12 均未倒退；全量 `discover` 172 项 = 3 failures + 2 errors + 1 skipped，与基线 3F+2E+1S 同源（live_news 1、chat_web 2、hermes_web 1、reply_limits 1），无新增失败。真实 8775 用用户原话复测：第一句回“还缺文件名，其余已提供的信息会保留。”；第二句回“已经在桌面创建“你好.txt”…内容：我爱你”，任务状态 `completed`，步骤含“已重新读取核对，内容一致”，磁盘 9 字节、内容逐字为“我爱你”。测试文件已删除、桌面恢复原样；未推 GitHub、未上线。
+
+## [2026-11-11] 智能路由 v1：按问题难度自动选本机 / 云端
+- 改了：新增 `training/auto_router.py:17-57` —— 规则法路由，不用模型判断难度（省一次调用和延迟）。`LONG_INPUT=200`；判定顺序 `explicit`（认真想/仔细点/用云端/换聪明的）→ `long`（≥200 字）→ `code`（写代码/改 bug/看代码/报错/python 等）→ `generate`（写一篇/帮我写/作文/方案/报告等）→ `reason`（分析/比较/为什么/规划/步骤），命中即走云端 deepseek-flash，都不命中走本机 qwen3:8b。
+- 改了：`training/chat_web.py:56-160` —— 新增 `ENGINE_CHOICES=('auto','local','deepseek')`、`engine_label()`（界面小字）、`engine_of()` 默认 `auto`、`cloud_key_ready()`（只探测不注入）、`ensure_cloud_key()`（真调用前才注入 DPAPI 密钥）、`route_for()`（逐条消息挑引擎；非 8775 仍用启动参数；手动 deepseek 无密钥就回落本机并说明）。
+- 改了：`training/chat_web.py:213` 与 `stream_reply` —— `engine` 事件只在页面请求带 `X-Orvyth-Engine: 1` 时下发，避免改变既有测试与脚本看到的事件流；云端首包失败且还没有任何输出时，自动重建本机会话重答，并再发一条 `engine` 事件写明“云端调用失败，已改用本机模型：…”。
+- 改了：`training/browser_store.py:54,138,196,224-229` —— `messages` 表加 `engine` 列；`chat_engine` 默认 `auto`；每条助手消息保存当条实际引擎，历史消息重新打开也能看到标记。
+- 改了：`training/browser/index.html:42`、`training/browser/app.js`、`training/browser/styles.css` —— 设置里三档“自动（推荐）/qwen3:8b 本机/deepseek-flash 云端”，默认自动；每条回复标题行加 `.engine-tag` 小字（如“本机 qwen3:8b · 简单问题，本机即可”）；自动档且没有云端密钥时，设置页明示“未找到云端密钥：自动模式目前全部使用本机模型。”
+- 改了：新增 `training/test_auto_router.py`（10 项）；`training/test_engine_switch.py` 改为默认 auto 并补 auto 三情形；`training/test_chat_web.py:274` 期望字段改 auto。
+- 因为：用户不想自己判断该换哪个模型。能力层上一轮已经和模型解耦，所以“自动换脑”不会再丢本地工具；用写死的规则而不是让模型先判断难度，避免每条消息先花一次钱。
+- 我能改：`training/auto_router.py:17` 的 `LONG_INPUT`（多长算“长”）；`:19-29` 四条正则（想加“翻译”“邮件润色”等触发词改这里）；`training/chat_web.py:56` 的 `ENGINE_CHOICES` 与 `:60` 的 `engine_label` 文案。改完跑 `cd training && python -m unittest test_auto_router test_engine_switch`。
+- 工具：Python 3 + unittest；本机 Ollama `qwen3:8b`；DeepSeek API（deepseek-flash，密钥仍走 DPAPI）；Edge headless + CDP 截图；Git。无新依赖。
+- 一句话总结：现在默认“自动”：闲聊、问事实、建文件找文件用本机，写代码、长文、分析推理自动切云端；每条回复都标出用的是哪个大脑，云端挂了会自己退回本机并告诉你。
+- 验证与状态：12 条样例逐条符合预期（闲聊/短问答/事实/文件 6 条本机；代码/长文/分析 6 条云端），同一对话第 11 条难→云端、第 12 条易→本机，未粘住云端；坏密钥实测先云端后自动回落本机且说明原因、无报错卡死。用量：6 次云端调用合计 prompt 5657（缓存命中 4608）+ completion 1027 ≈ 6684 tokens，约 ¥0.01 量级。全量 `discover` 185 项 = 3 failures + 2 errors + 1 skipped，与基线同源，无新增失败。测试文件已删、测试服务已停；未推 GitHub、未上线。

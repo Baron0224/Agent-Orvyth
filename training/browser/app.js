@@ -103,6 +103,21 @@ function formatAssistantText(text) {
     return separator + line.trimStart();
   }).join('');
 }
+function markEngine(entry, info) {
+  if (!entry || !info || !info.engine) return;
+  let tag = entry.querySelector('.engine-tag');
+  if (!tag) {
+    tag = document.createElement('span'); tag.className = 'engine-tag';
+    const label = entry.querySelector('.label');
+    if (!label) return;
+    label.append(tag);
+  }
+  const text = info.label || (info.engine === 'deepseek' ? '云端 deepseek-flash' : '本机模型');
+  tag.textContent = text;
+  tag.title = info.reason ? text + ' · ' + info.reason : text;
+  tag.dataset.engine = info.engine;
+  entry.dataset.engine = info.engine;
+}
 function addMessage(role, text = '', complete = true) {
   $('#welcome').hidden = true;
   const entry = document.createElement('article'); entry.className = `message ${role}`;
@@ -195,7 +210,7 @@ function applyState(data, full = false) {
   renderProfile(); renderHistory(); renderTasks();
   if (full) {
     messages.replaceChildren(); $('#welcome').hidden = false;
-    for (const message of data.messages) { const item=addMessage(message.role, message.content); if(message.task_trace) window.OrvythTaskProgress.render(item.entry,message.task_trace); if(message.file_results)window.OrvythAnswerView.files(item.entry,message.file_results); }
+    for (const message of data.messages) { const item=addMessage(message.role, message.content); markEngine(item.entry, message.engine); if(message.task_trace) window.OrvythTaskProgress.render(item.entry,message.task_trace); if(message.file_results)window.OrvythAnswerView.files(item.entry,message.file_results); }
     follow(true);
   }
   controls();
@@ -205,7 +220,11 @@ async function checkConnection() {
   try {
     const data = await requestJSON('/api/status'); ready = data.ready;
     status.textContent = data.provider === 'deepseek' ? (data.verified ? '云端曾连接成功' : data.configured ? '密钥已配置·未验证' : '云端未配置') : ready ? '可以聊天' : '暂未连接'; status.className = `connection ${ready ? 'ready' : 'error'}`;
-    $('#reconnect').hidden = ready; setNotice(data.provider === 'deepseek' ? data.message : ready ? '' : data.message);
+    const note = $('#engine-note');
+    if (note) note.textContent = data.engine === 'auto'
+      ? (data.cloud_key === false ? '未找到云端密钥：自动模式目前全部使用本机模型。' : '自动模式：简单问题用本机，复杂问题切云端。')
+      : '只切换聊天模型；账户、长期档案和当前任务状态都不变。';
+    $('#reconnect').hidden = ready; setNotice(data.provider === 'deepseek' || data.engine === 'auto' ? data.message : ready ? '' : data.message);
   } catch {
     ready = false; status.textContent = '服务已断开'; status.className = 'connection error'; $('#reconnect').hidden = false;
     setNotice('请保持启动窗口开启，再点检查连接。');
@@ -259,13 +278,14 @@ async function submit(text) {
   }});
   currentReply=run;controls();
   try {
-    const response = await fetch('/api/chat', {signal:run.controller.signal,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,chat_id:conversation})});
+    const response = await fetch('/api/chat', {signal:run.controller.signal,method:'POST',headers:{'Content-Type':'application/json','X-Orvyth-Engine':'1'},body:JSON.stringify({message:text,chat_id:conversation})});
     if (!response.ok) { const data = await response.json(); throw new Error(data.error || '暂时无法回答，请重试。'); }
     const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
     const consume = line => {
       if(currentReply!==run)return;
       if (!line.trim()) return; const event = JSON.parse(line);
       if (event.type === 'error') throw new Error(event.message);
+      if (event.type === 'engine') markEngine(answer.entry, event);
       if (event.type === 'task') { taskActive=event.task.state==='running'; window.OrvythTaskProgress.render(answer.entry,event.task); }
       if (event.type === 'files') window.OrvythAnswerView.files(answer.entry,event.items);
       if (event.type === 'done') {done = true;run.networkDone=true;}
@@ -337,7 +357,7 @@ async function openSettings() {
   selectPetDraft(profile.pet_kind || 'dog');
   $('#name-input').value = profile.name; $('#pet-name-input').value = profile.pet_name; $('#motion-input').checked = profile.pet_motion;
   $('#address-input').value = profile.user_address || '';
-  $('#engine-input').value = profile.chat_engine === 'deepseek' ? 'deepseek' : 'local';
+  $('#engine-input').value = ['auto','local','deepseek'].includes(profile.chat_engine) ? profile.chat_engine : 'auto';
   paintAvatar($('#avatar-edit'), draftAvatar, profile.name); $('#settings-error').textContent = ''; $('#settings-dialog').showModal();
 
 }

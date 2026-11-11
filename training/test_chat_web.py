@@ -271,7 +271,7 @@ class WebChatTest(unittest.TestCase):
         self.send('重启之后还要在')
         self.stop(); self.start()
         data=self.state()
-        self.assertEqual(data['profile'],{**DEFAULTS, **profile, 'chat_engine':'local'})
+        self.assertEqual(data['profile'],{**DEFAULTS, **profile, 'chat_engine':'auto'})
         self.assertEqual(data['tasks'][0]['done'],1)
         self.assertEqual(data['messages'][0]['content'],'重启之后还要在')
         self.request('POST','/api/tasks/toggle',{'id':task['id'],'done':False})

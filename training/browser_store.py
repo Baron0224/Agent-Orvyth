@@ -50,6 +50,8 @@ class Store:
             columns = {row["name"] for row in db.execute("PRAGMA table_info(tasks)")}
             if 'task_trace' not in {row['name'] for row in db.execute('PRAGMA table_info(messages)')}:
                 db.execute('ALTER TABLE messages ADD COLUMN task_trace TEXT')
+            if 'engine' not in {row['name'] for row in db.execute('PRAGMA table_info(messages)')}:
+                db.execute('ALTER TABLE messages ADD COLUMN engine TEXT')
             for name, kind in (("remind_time", "TEXT"), ("start_date", "TEXT"), ("end_date", "TEXT"), ("last_done_date", "TEXT"), ("due_at", "REAL")):
                 if name not in columns:
                     db.execute(f"ALTER TABLE tasks ADD COLUMN {name} {kind}")
@@ -125,13 +127,16 @@ class Store:
                         item["remind_due"] = not item["done"] and not item["waiting"] and today >= item["start_date"] and now.strftime("%H:%M") >= item["remind_time"]
                 tasks.append(item)
             messages = []
-            for row in db.execute("SELECT id,role,content,task_trace,search_evidence,usage FROM messages WHERE chat=? ORDER BY id", (profile["active_chat"],)):
+            for row in db.execute("SELECT id,role,content,task_trace,search_evidence,usage,engine FROM messages WHERE chat=? ORDER BY id", (profile["active_chat"],)):
                 item={'role':row['role'],'content':row['content']}
                 if row['search_evidence']:item['file_results']=cards(profile['active_chat'],row['id'],json.loads(row['search_evidence']))
                 if row['usage']: item['usage']=json.loads(row['usage'])
                 if row['task_trace']: item['task_trace']=json.loads(row['task_trace'])
+                if row['engine']: item['engine']=json.loads(row['engine'])
                 messages.append(item)
-            return {"profile": {**DEFAULTS, **{k: v for k, v in json.loads(profile["profile"]).items() if k not in RETIRED}}, "chats": chats, "tasks": tasks,
+            merged = {**DEFAULTS, **{k: v for k, v in json.loads(profile["profile"]).items() if k not in RETIRED}}
+            merged.setdefault('chat_engine', 'auto')
+            return {"profile": merged, "chats": chats, "tasks": tasks,
                     "active_chat": profile["active_chat"], "messages": messages}
 
     def history(self, owner, chat):
@@ -188,7 +193,7 @@ class Store:
             else:
                 raise ValueError("未知聊天操作。")
 
-    def save_pair(self, owner, chat, question, answer, task_trace=None, search_evidence=None, usage=None):
+    def save_pair(self, owner, chat, question, answer, task_trace=None, search_evidence=None, usage=None, engine=None):
         with self.connect() as db:
             row = self.require_chat(db, owner, chat)
             address = json.loads(db.execute("SELECT profile FROM owners WHERE id=?", (owner,)).fetchone()["profile"]).get("user_address", "")
@@ -197,6 +202,8 @@ class Store:
                 (chat, "user", question), (chat, "assistant", answer)])
             if usage:
                 db.execute('UPDATE messages SET usage=? WHERE id=last_insert_rowid()', (json.dumps(usage),))
+            if engine:
+                db.execute('UPDATE messages SET engine=? WHERE id=last_insert_rowid()', (json.dumps(engine, ensure_ascii=False),))
             if search_evidence:
                 db.execute('UPDATE messages SET search_evidence=? WHERE id=last_insert_rowid()', (json.dumps(search_evidence,ensure_ascii=False),))
             if task_trace:
@@ -218,7 +225,9 @@ class Store:
         with self.connect() as db:
             row = db.execute("SELECT profile FROM owners WHERE id=?", (owner,)).fetchone()
             stored = json.loads(row["profile"])
-        return {**DEFAULTS, **{key: value for key, value in stored.items() if key not in RETIRED}}
+        merged = {**DEFAULTS, **{key: value for key, value in stored.items() if key not in RETIRED}}
+        merged.setdefault('chat_engine', 'auto')
+        return merged
 
     def save_profile(self, owner, payload):
         name = self.text(payload.get("name"), 24, "昵称")
@@ -229,8 +238,8 @@ class Store:
         if kind is not None and kind not in ("dog", "cat", "rabbit", "robot"):
             raise ValueError("请选择小狗、小猫、小兔子或小机器人。")
         engine = payload.get("chat_engine")
-        if engine is not None and engine not in ("local", "deepseek"):
-            raise ValueError("请选择本机引擎或云端引擎。")
+        if engine is not None and engine not in ("auto", "local", "deepseek"):
+            raise ValueError("请选择自动、本机引擎或云端引擎。")
         if not isinstance(motion, bool) or not isinstance(avatar, str):
             raise ValueError("资料格式不正确。")
         if avatar:
@@ -253,7 +262,7 @@ class Store:
                 previous = db.execute("SELECT profile FROM owners WHERE id=?", (owner,)).fetchone()
                 kind = json.loads(previous["profile"]).get("pet_kind", "dog")
             profile["pet_kind"] = kind
-            profile["chat_engine"] = engine if engine is not None else old_profile.get("chat_engine", "local")
+            profile["chat_engine"] = engine if engine is not None else old_profile.get("chat_engine", "auto")
             db.execute("UPDATE owners SET profile=? WHERE id=?", (json.dumps(profile), owner))
 
     def task_action(self, owner, action, payload):

@@ -36,9 +36,11 @@ class ProfileTest(unittest.TestCase):
         payload.update(extra)
         self.store.save_profile(self.owner, payload)
 
-    def test_default_is_local_and_survives_restart(self):
+    def test_default_is_auto_and_survives_restart(self):
         self._save()
-        self.assertEqual(self.store.profile(self.owner)['chat_engine'], 'local')
+        self.assertEqual(self.store.profile(self.owner)['chat_engine'], 'auto')
+        reopened = Store(str(Path(self.tmp.name) / 'browser.sqlite3'))
+        self.assertEqual(reopened.profile(self.owner)['chat_engine'], 'auto')
 
     def test_deepseek_is_persisted(self):
         self._save(chat_engine='deepseek')
@@ -71,13 +73,27 @@ class SelectedModelTest(unittest.TestCase):
 
     def test_deepseek_engine_uses_cloud_model(self):
         self.store.save_profile(self.owner, {'name': 'x', 'pet_name': 'y', 'chat_engine': 'deepseek'})
-        self.srv.ensure_cloud_key = lambda: True
+        self.srv.cloud_key_ready = lambda: True
         self.assertEqual(self.srv.selected_model(self.owner), 'deepseek-cloud:deepseek-flash')
 
     def test_missing_key_falls_back_to_local(self):
         self.store.save_profile(self.owner, {'name': 'x', 'pet_name': 'y', 'chat_engine': 'deepseek'})
-        self.srv.ensure_cloud_key = lambda: False
+        self.srv.cloud_key_ready = lambda: False
         self.assertEqual(self.srv.selected_model(self.owner), 'qwen3:8b')
+
+    def test_auto_keeps_small_talk_local(self):
+        self.srv.cloud_key_ready = lambda: True
+        self.assertEqual(self.srv.selected_model(self.owner, '你好呀，今天怎么样'), 'qwen3:8b')
+
+    def test_auto_sends_code_to_cloud(self):
+        self.srv.cloud_key_ready = lambda: True
+        self.assertEqual(self.srv.selected_model(self.owner, '帮我看看这段 Python 为什么报错'), 'deepseek-cloud:deepseek-flash')
+
+    def test_auto_without_cloud_key_stays_local(self):
+        self.srv.cloud_key_ready = lambda: False
+        route = self.srv.route_for(self.owner, '帮我看看这段 Python 为什么报错')
+        self.assertEqual(route['model'], 'qwen3:8b')
+        self.assertIn('密钥', route['reason'])
 
     def test_terminal_port_ignores_engine(self):
         self.srv.server_port = 8776
