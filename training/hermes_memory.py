@@ -6,7 +6,7 @@ from pathlib import Path
 from hermes_memory_vendor.store import MemoryStore, _scan_memory_content
 from hermes_memory_vendor.compat import memory_root
 
-CATEGORIES={'personal':'个人资料','preference':'回答偏好','habit':'长期习惯','other':'其他／待整理'}
+CATEGORIES={'name':'姓名','school':'学校','personal':'个人资料','preference':'回答偏好','habit':'长期习惯','other':'其他／待整理'}
 class HermesMemory:
  def __init__(self,directory):self.directory=Path(directory)
  def file_path(self,owner):

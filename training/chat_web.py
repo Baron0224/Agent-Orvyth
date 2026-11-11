@@ -323,6 +323,10 @@ class Handler(BaseHTTPRequestHandler):
         history = self.server.store.history(owner, chat)
         profile = self.server.store.state(owner)['profile']
         if local_web_tasks.enabled(self.server.provider, self.server.server_port):
+            saved = local_web_tasks.personal_write(self.server.memory, owner, question)
+            if saved is not None:
+                self.stream_file_chat(owner, chat, question, {'reply': saved})
+                return
             personal = local_web_tasks.personal_reply(self.server.memory, owner, question)
             if personal is not None:
                 self.stream_file_chat(owner, chat, question, {'reply': personal})

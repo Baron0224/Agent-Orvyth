@@ -511,3 +511,17 @@
 - 工具：Python 3 + unittest + 临时目录真实 HTTP 请求（`test_chat_web.WebChatTest` 原样复用）；本机 Ollama `qwen3:8b` 的真实 8775 服务（`--data-dir` 指向临时目录，未碰默认账户数据库）；Git。无新依赖、无付费 API、无子代理。
 - 一句话总结：从今以后“完成”只认磁盘上的真实读取记录，模型嘴上说读不到而记录显示读了，页面会直接给出真实内容；真读不到就如实标失败。
 - 验证与状态：新 9 项全过（2.5 秒）。第一轮 16 项针对性回归逐项通过：`test_memory_file_read` 1、`test_pending_memory` 1、`test_candidate_selection` 1、`test_file_chat` 9、`test_hermes_memory` 4；另 `test_local_web_tasks` 5 项也通过。旧接续用例 `test_project_lookup.test_no_hit_missing_artifact_and_legacy_prompt` 仍为 ERROR（`plan` 为 None，第 99 行 `plan['file_lookup']` TypeError），属 `training/file_chat.py:35-36` 既有路由判定，本轮范围为完成判定、未改，如实报未过。全量 `discover` 149 项：3 failures + 3 errors + 1 skipped，与改动前 140 项基线逐项同源（live_news 1、chat_web 2、hermes_web/project_lookup/reply_limits 各 1），无新增失败。真实 8775（临时数据目录、chat/tool 均 qwen3:8b）：`读取"C:\Users\穆柏润\OneDrive\桌面\orvyth测试.txt"的内容` → 18.4 秒 completed，答复“文件内容是「核心路径实测」”，步骤含“已读取文件”；`读取"…\不存在的文件xyz.txt"的内容` → 0.1 秒 failed，答复“我没找到这个文件或文件夹”，未编造内容。口语化“读取桌面上的 orvyth测试.txt 的内容”先返回 5 个候选（同名/同前缀散落多处），回“3”选中桌面文件后 completed 并读出「核心路径实测」——两步流程，未自动猜。`git diff --check` 通过。本轮只使用临时数据目录，未读取用户真实长期档案原文、未迁移或删除任何档案、未改云端版与终端、未重启用户正在用的服务；本次已本地提交，未推 GitHub、未上线。
+
+
+## [2026-11-11] 个人事实写入长期档案，问句仍走查询
+- 改了：`training/local_web_tasks.py:24-104` —— 新增 `personal_write(memory, owner, question)`：只在本地 8775 生效；先剥掉写命令前缀/后缀（`记住`、`帮我记`、`存进长期记忆：` 等），按 `，,。；;、` 切回原句分句，逐句按 `_clause_category` 判类（`name` 姓名 / `school` 学校 / `personal` 其他第一人称事实），内容一字不改地原样入库，类别标签随条目保存；写入后再读一次档案，回复“已存入…”并列出类别与原句、当前总条数；重复内容不重复写；含密码/验证码/银行卡的句子交给原 `validate` 拒绝并明说未写入。`personal_reply` 的学校取值正则改为能识别“在大连东软信息学院上学”这类句子，问句仍只查不写。
+- 改了：`training/hermes_memory.py:9` —— `CATEGORIES` 新增 `name:'姓名'`、`school:'学校'`，让档案条目带可读标签，`decode`/`validate` 自动接受新类别。
+- 改了：`training/chat_web.py:325-329` —— 8775 分流在查询前先调 `personal_write`，写入命中就直接回复并存档，不再掉进后面的 `personal_answer` 查询分支（这就是“我叫穆柏润…记住”被答成“没找到记录”的原因）。
+- 改了：`training/file_chat.py:30-37` —— 旧接续修复：等待位置时若用户说“找不到/帮我找/再找找”，先从历史里找回原始请求继续定位，而不是直接 `return None`；其余不含文件语义的句子行为不变。
+- 改了：`training/browser/app.js:438`、`training/browser/index.html:46` —— 记忆管理页的类别下拉与显示映射补上“姓名/学校”，否则编辑这两类条目时下拉框对不上、保存会被服务端拒绝。
+- 改了：`training/test_personal_write.py:1-84` —— 7 项新单元回归：两种原句都写入且原样保存、类别正确、问答回读、问句不写、重复不重复写、无记录事实不张冠李戴、凭据句子不落库、无关的记忆命令仍走原路径。
+- 因为：用户实测四句全部被当成查询，根因是写命令正则只认“记住：”在句首，且“我叫X”单句在 `personal_answer` 里被明确设计成“只称呼、不保存”；写入路径 `memory.command` 根本没被这些句子触发。修在分流入口、保留原 `command` 处理其它记忆指令，影响面只在 8775。
+- 我能改：`training/local_web_tasks.py:28-31` 的写意图/问句关键词；`:36-45` 的 `_clause_category` 判类规则（想支持“我的生日是…”时在这里加一类）；`:76` 回复文案；`training/hermes_memory.py:9` 的类别表（加了要同步 `training/browser/app.js:438` 与 `training/browser/index.html:46`）。改完跑 `cd training && python -m unittest test_personal_write test_local_web_tasks`。
+- 工具：Python 3 + unittest；本机 Ollama `qwen3:8b` 的真实 8775 服务（`--data-dir` 指向临时目录，未碰默认账户数据库）；Windows `netstat`/`taskkill` 清掉占用端口的旧进程；Git。无新依赖、无付费 API。
+- 一句话总结：现在对小白说“我叫穆柏润，在大连东软信息学院上学，记住”，它会真写进当前账户档案并回你存了哪两条；问“我叫什么、在哪上学”能答对，重启后还在；问档案里没有的密码仍然答“没有记录”。
+- 验证与状态：`test_personal_write` 7 项全过；旧接续 `test_project_lookup` 5 项全过（原 ERROR 已消失）；完成判定 9 项 + 第一轮 16 项 + `test_local_web_tasks` 5 项 = 30 项全过；全量 `discover` 156 项 = 3 failures + 2 errors + 1 skipped，较基线 3F+3E+1S 少一个 error（project_lookup 已修），其余 5 项与基线同源（live_news 1、chat_web 2、hermes_web 1、reply_limits 1），无新增失败。真实 8775（临时数据目录、chat/tool 均 qwen3:8b）：首句写入 → 回复两条 [姓名]/[学校] 与“共 2 条记录”，`GET /api/memory` 返回两条 `source=explicit_chat`；同会话问“我叫什么，在哪上学” → “姓名：穆柏润／学校：大连东软信息学院”；杀进程重启后再问 → 仍答对；问“我的银行卡密码是什么” → 明确无记录、未带出姓名学校；“帮我存进长期记忆：…”在新账户同样写入两条。`git diff --check` 通过。未读取用户真实档案原文、未碰其他账户与云端、未推 GitHub、未上线。

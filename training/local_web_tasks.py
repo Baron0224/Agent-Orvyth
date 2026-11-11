@@ -21,6 +21,83 @@ def enabled(provider, port):
     return provider == 'ollama' and port == 8775
 
 
+LABELS = {'name': '姓名', 'school': '学校', 'personal': '个人资料'}
+_CLAUSE = re.compile(r'[^，,。；;、\n]+')
+_WRITE_HINT = re.compile(r'记住|帮我记|替我记|记一下|记下来|存进长期记忆|存入长期记忆|存到长期记忆|保存到长期记忆|保存进长期记忆|写进长期记忆|写进档案|记到档案|放进长期记忆|长期记忆')
+_QUESTION_HINT = re.compile(r'[？?]|什么|啥|谁|哪|多少|几[号年]|吗|呢')
+_COMMAND_PREFIX = re.compile(r'^(?:(?:请|帮我|替我|麻烦你?)\s*)?(?:把\s*)?(?:记住|记一下|记下来|帮我记住|帮我记一下|(?:帮我|替我)?(?:存|保存|放|写)(?:进|入|到)?(?:长期)?记忆|记到档案|写进档案)[：:，,\s]*')
+_COMMAND_SUFFIX = re.compile(r'[，,。；;\s]*(?:记住|记一下|记下来|帮我记住|存进长期记忆|存入长期记忆)[。！!]*$')
+_SCHOOL = re.compile(r'大学|学院|学校|中学|高中')
+_STUDY = re.compile(r'上学|就读|读书|学习|念书|在读')
+
+
+def _fact_clauses(text):
+    text = _COMMAND_PREFIX.sub('', text.strip())
+    text = _COMMAND_SUFFIX.sub('', text)
+    return [c.strip() for c in _CLAUSE.findall(text) if c.strip()]
+
+
+def _clause_category(clause):
+    if re.search(r'我叫|我的(?:真实)?(?:姓名|名字)|我名字叫|姓名是', clause):
+        return 'name'
+    if _SCHOOL.search(clause) and (_STUDY.search(clause) or re.search(r'^(?:我)?(?:在|于)', clause)):
+        return 'school'
+    if re.match(r'^我的.{1,24}?(?:是|叫|为)', clause) or re.match(r'^我(?:喜欢|习惯|偏好|讨厌|擅长)', clause):
+        return 'personal'
+    return None
+
+
+def personal_write(memory, owner, question):
+    """Store first-person facts the user states or asks to remember, verbatim.
+
+    Only runs for the local 8775 app. Questions stay on the lookup path.
+    """
+    incoming = (question or '').strip()
+    if not incoming:
+        return None
+    clauses = _fact_clauses(incoming)
+    facts = [(c, _clause_category(c)) for c in clauses]
+    facts = [(c, k) for c, k in facts if k]
+    if not facts:
+        return None
+    if _QUESTION_HINT.search(incoming) and not _WRITE_HINT.search(incoming):
+        return None
+    if not _WRITE_HINT.search(incoming) and not any(k in ('name', 'school') for _, k in facts):
+        return None
+    try:
+        existing = {item['content'] for item in memory.entries(owner)}
+    except (OSError, ValueError):
+        return '当前账户档案暂时无法读取，这次没有保存。'
+    saved, repeated, rejected = [], [], []
+    for clause, category in facts:
+        if clause in existing:
+            repeated.append(clause)
+            continue
+        try:
+            memory.mutate(owner, 'add', content=clause, category=category, source='explicit_chat')
+            saved.append((clause, category))
+            existing.add(clause)
+        except ValueError as error:
+            rejected.append((clause, str(error)))
+    try:
+        total = len(memory.entries(owner))
+    except (OSError, ValueError):
+        total = None
+    if saved:
+        lines = ['已存入当前账户的长期档案（只在本机）：']
+        lines += ['- [' + LABELS[k] + '] ' + c for c, k in saved]
+        if total is not None:
+            lines.append('当前账户档案共 ' + str(total) + ' 条记录。')
+        if repeated:
+            lines.append('已在档案里、没有重复写入：' + '；'.join(repeated))
+        return '\n'.join(lines)
+    if repeated and not rejected:
+        return '这些内容之前已经存进当前账户的长期档案，没有重复写入：' + '；'.join(repeated)
+    if rejected:
+        return '这些内容没有写入长期档案：' + '；'.join(c + '（' + r + '）' for c, r in rejected)
+    return None
+
+
 def personal_reply(memory, owner, question):
     if memory.is_command(question):
         return None
@@ -29,8 +106,8 @@ def personal_reply(memory, owner, question):
     topics = []
     if re.search(r'我叫(?:什么|啥)|我的?(?:真实)?(?:姓名|名字)', question):
         topics.append(('姓名', r'(?:真实姓名|姓名|我的名字是|我叫)\s*[：:是]?\s*([^，。；;\n]+)'))
-    if re.search(r'(?:我.*)?(?:在哪上学|在哪就读|我的学校|就读学校)', question):
-        topics.append(('学校', r'(?:学校|就读学校|就读于|我在)\s*[：:是]?\s*([^，。；;\n]+)'))
+    if re.search(r'(?:我.*)?(?:在哪(?:个)?(?:上学|就读|学校|大学)|我的学校|就读学校|哪个学校|哪所(?:学校|大学)|什么学校)', question):
+        topics.append(('学校', r'(?:学校|就读学校|就读于|我在|在|于)\s*[：:是]?\s*([^，。；;\n]{2,30}?)\s*(?:上学|就读|读书|学习|念书)?$'))
     ordinary = re.search(r'我的(.{1,20}?)(?:是什么|叫什么|是谁)[？?。]*$', question)
     if not topics and not ordinary:
         return None

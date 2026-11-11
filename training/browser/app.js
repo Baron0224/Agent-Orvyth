@@ -435,7 +435,7 @@ document.querySelectorAll('[data-pet-kind]').forEach(card=>card.addEventListener
 
 /* Explicit, account-scoped memory management; no client-side personal profile storage. */
 let memoryEditing=null, memoryBusy=false;
-const memoryCategories={personal:'个人资料',preference:'回答偏好',habit:'长期习惯',other:'其他／待整理'};
+const memoryCategories={name:'姓名',school:'学校',personal:'个人资料',preference:'回答偏好',habit:'长期习惯',other:'其他／待整理'};
 function resetMemoryForm(){memoryEditing=null;$('#memory-content').value='';$('#memory-category').value='other';$('#memory-save').textContent='添加记忆';$('#memory-cancel').hidden=true;}
 function renderMemories(entries){
  const list=$('#memory-list');list.replaceChildren();$('#memory-clear').disabled=!entries.length;

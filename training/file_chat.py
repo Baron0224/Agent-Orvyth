@@ -28,7 +28,13 @@ def file_request(question, history, context=None):
     waiting=any(message in last for message in (ASK_PATH,PROJECT_LOCATION,PROJECT_LOCAL,PROJECT_WEB,'我没找到这个文件或文件夹。'))
     continuation=bool(natural_location(question) or re.search(r'[A-Za-z]:[\\/]|https?://|^["“`]?/|[\w-]+\.[a-zA-Z0-9]{1,8}\b',question) or re.fullmatch(r'\s*(?:对|是|是的|本地|电脑里|文件夹|网站|网页|网上|[A-Za-z]盘)[。！!\s]*',question))
     if waiting and not local_intent(question) and not continuation:
-        return None
+        help_request = re.search(r'找不到|找不到了|帮我找|再找找|在哪', question)
+        prior = next((x['content'] for x in reversed(history[:-1])
+                      if x.get('role') == 'user' and re.search(r'图纸|demo|原型|项目资料', x.get('content', ''), re.I)), None) if help_request else None
+        if prior:
+            question = prior
+        else:
+            return None
     if re.search(r'网上|联网|网站|网页|https?://',question) and not re.search(r'本地|电脑|[A-Za-z]:[\\/]',question):
         return None
     located=locate_project(question,history,context)
