@@ -52,7 +52,7 @@ class Store:
                 db.execute('ALTER TABLE messages ADD COLUMN task_trace TEXT')
             if 'engine' not in {row['name'] for row in db.execute('PRAGMA table_info(messages)')}:
                 db.execute('ALTER TABLE messages ADD COLUMN engine TEXT')
-            for name, kind in (("remind_time", "TEXT"), ("start_date", "TEXT"), ("end_date", "TEXT"), ("last_done_date", "TEXT"), ("due_at", "REAL")):
+            for name, kind in (("remind_time", "TEXT"), ("start_date", "TEXT"), ("end_date", "TEXT"), ("last_done_date", "TEXT"), ("due_at", "REAL"), ("fired_at", "REAL"), ("missed", "INTEGER"), ("last_fire_date", "TEXT")):
                 if name not in columns:
                     db.execute(f"ALTER TABLE tasks ADD COLUMN {name} {kind}")
             db.execute("CREATE TABLE IF NOT EXISTS reminder_drafts (chat TEXT PRIMARY KEY, owner TEXT NOT NULL, data TEXT NOT NULL)")
@@ -109,22 +109,31 @@ class Store:
             for row in db.execute("SELECT * FROM tasks WHERE owner=? ORDER BY created DESC", (owner,)):
                 item = dict(row)
                 if item["remind_time"]:
-                    if item["due_at"] is not None:
-                        item["waiting"] = now.timestamp() < item["due_at"] and not item["last_done_date"]
-                        item["expired"] = False
-                        item["done"] = int(bool(item["last_done_date"]))
-                    else:
-                        expired = bool(item["end_date"] and today > item["end_date"])
-                        scheduled = today < item["start_date"] or bool(item["last_done_date"] and item["last_done_date"] < today and now.strftime("%H:%M") < item["remind_time"])
-                        item["waiting"] = scheduled
-                        item["expired"] = expired
-                        item["done"] = int(expired or scheduled or item["last_done_date"] == today)
-                if item["remind_time"]:
                     item["occurrence_date"] = today
                     if item["due_at"] is not None:
+                        due = item["due_at"]
+                        # 页面一直没打开、错过超过 10 分钟：标记“已错过”并归档，保留原定触发时间。
+                        if not item["fired_at"] and not item["last_done_date"] and now.timestamp() >= due + 600:
+                            db.execute("UPDATE tasks SET fired_at=?, missed=1 WHERE id=? AND owner=?", (due, item["id"], owner))
+                            item["fired_at"] = due
+                            item["missed"] = 1
+                        item["done"] = int(bool(item["fired_at"] or item["last_done_date"]))
+                        item["waiting"] = not item["done"] and now.timestamp() < due
+                        item["expired"] = False
                         item["remind_due"] = not item["done"] and not item["waiting"]
+                        item["daily"] = False
                     else:
-                        item["remind_due"] = not item["done"] and not item["waiting"] and today >= item["start_date"] and now.strftime("%H:%M") >= item["remind_time"]
+                        expired = bool(item["end_date"] and today > item["end_date"])
+                        fired_today = item.get("last_fire_date") == today
+                        done_today = item.get("last_done_date") == today
+                        before_time = now.strftime("%H:%M") < item["remind_time"]
+                        item["daily"] = not bool(item["end_date"])
+                        item["expired"] = expired
+                        item["done"] = int(expired or done_today)
+                        item["waiting"] = bool(expired or today < item["start_date"] or fired_today or done_today or (before_time and not fired_today))
+                        item["remind_due"] = (not expired and not done_today and not fired_today
+                                              and today >= item["start_date"] and not before_time)
+                item["missed"] = int(item.get("missed") or 0)
                 tasks.append(item)
             messages = []
             for row in db.execute("SELECT id,role,content,task_trace,search_evidence,usage,engine FROM messages WHERE chat=? ORDER BY id", (profile["active_chat"],)):
@@ -275,6 +284,20 @@ class Store:
             row = db.execute("SELECT * FROM tasks WHERE id=? AND owner=?", (task, owner)).fetchone()
             if not row:
                 raise MissingRecord("任务不存在。")
+            if action == "fire":
+                now = local_now()
+                today = now.date().isoformat()
+                if not row["remind_time"]:
+                    raise ValueError("这个事项没有设置提醒时间。")
+                if row["due_at"] is not None:
+                    if row["fired_at"] or row["last_done_date"]:
+                        return
+                    db.execute("UPDATE tasks SET fired_at=?, missed=0 WHERE id=? AND owner=?", (min(now.timestamp(), row["due_at"] + 600), task, owner))
+                else:
+                    if row["last_fire_date"] == today:
+                        return
+                    db.execute("UPDATE tasks SET last_fire_date=?, fired_at=? WHERE id=? AND owner=?", (today, now.timestamp(), task, owner))
+                return
             if action == "toggle":
                 if not isinstance(payload.get("done"), bool):
                     raise ValueError("任务状态不正确。")

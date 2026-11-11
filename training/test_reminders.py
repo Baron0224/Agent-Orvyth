@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch
 from browser_store import Store
-from reminders import process_reminder, read_time
+from reminders import capability_answer, process_reminder, read_time
 
 
 def moment(day, hour, minute=0):
@@ -103,14 +103,14 @@ class ReminderTest(unittest.TestCase):
         self.assertIn('只能设置一次', self.store.reminder_chat(self.owner, self.chat, '2分钟后'))
         self.assertEqual(self.store.state(self.owner)['tasks'], [])
 
-    def test_overdue_relative_survives_until_done(self):
+    def test_overdue_relative_is_marked_missed_and_archived(self):
         self.store.reminder_chat(self.owner, self.chat, '2分钟后提醒我喝水')
         with patch('browser_store.local_now', return_value=moment(3, 15)):
             task = self.store.state(self.owner)['tasks'][0]
             self.assertFalse(task['waiting'])
-            self.assertFalse(task['done'])
-            self.store.task_action(self.owner, 'toggle', {'id': task['id'], 'done': True})
-            self.assertTrue(self.store.state(self.owner)['tasks'][0]['done'])
+            self.assertTrue(task['done'])
+            self.assertEqual(task['missed'], 1)
+            self.assertEqual(task['fired_at'], task['due_at'])
 
     def test_daily_notification_only_due_after_scheduled_time(self):
         self.store.reminder_chat(self.owner, self.chat, '每天13:00提醒我打卡')
@@ -121,6 +121,46 @@ class ReminderTest(unittest.TestCase):
             self.assertEqual(task['occurrence_date'], '2026-11-02')
             self.store.task_action(self.owner, 'toggle', {'id': task['id'], 'done': True})
             self.assertFalse(self.store.state(self.owner)['tasks'][0]['remind_due'])
+
+    def test_record_phrase_builds_daily_item(self):
+        reply = self.store.reminder_chat(self.owner, self.chat, '帮我记录每天晚上22:29熄灯')
+        task = self.store.state(self.owner)['tasks'][0]
+        self.assertEqual((task['title'], task['remind_time'], task['end_date']), ('熄灯', '22:29', None))
+        self.assertTrue(task['daily'])
+        self.assertIn('右侧待办', reply)
+        self.assertIn('网页', reply)
+
+    def test_capability_question_never_creates(self):
+        self.assertIsNone(self.store.reminder_chat(self.owner, self.chat, '你会提醒我吗'))
+        self.assertIsNone(self.store.reminder_chat(self.owner, self.chat, '你能提醒我吗？'))
+        self.assertEqual(self.store.state(self.owner)['tasks'], [])
+        self.assertIn('会', capability_answer('你会提醒我吗'))
+        self.assertIn('网页', capability_answer('你能提醒我吗'))
+
+    def test_fire_archives_one_shot_and_keeps_trigger_time(self):
+        self.store.reminder_chat(self.owner, self.chat, '2分钟后提醒我喝水')
+        task = self.store.state(self.owner)['tasks'][0]
+        with patch('browser_store.local_now', return_value=moment(2, 12, 2)):
+            self.store.task_action(self.owner, 'fire', {'id': task['id']})
+            fired = self.store.state(self.owner)['tasks'][0]
+            self.assertTrue(fired['done'])
+            self.assertEqual(fired['missed'], 0)
+            self.assertAlmostEqual(fired['fired_at'], task['due_at'], places=3)
+
+    def test_fire_rolls_daily_to_next_day_without_completing(self):
+        self.store.reminder_chat(self.owner, self.chat, '每天13:00提醒我打卡')
+        task = self.store.state(self.owner)['tasks'][0]
+        with patch('browser_store.local_now', return_value=moment(2, 13)):
+            self.store.task_action(self.owner, 'fire', {'id': task['id']})
+            fired = self.store.state(self.owner)['tasks'][0]
+            self.assertFalse(fired['done'])
+            self.assertTrue(fired['waiting'])
+            self.assertFalse(fired['remind_due'])
+            self.assertEqual(fired['last_fire_date'], '2026-11-02')
+        with patch('browser_store.local_now', return_value=moment(3, 13)):
+            next_day = self.store.state(self.owner)['tasks'][0]
+            self.assertTrue(next_day['remind_due'])
+            self.assertFalse(next_day['done'])
 
     def test_time_parser(self):
         self.assertEqual(read_time('下午一点半'), '13:30')

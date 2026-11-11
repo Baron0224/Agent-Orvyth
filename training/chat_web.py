@@ -23,6 +23,7 @@ from file_write import create_text_file
 from word_write import create_word_file
 from cloud_credentials import load_key
 from hermes_memory import HermesMemory
+import reminders
 from task_trace import TaskTrace
 from runtime_capabilities import assessment, is_self_assessment
 from file_preview import cards, preview
@@ -303,7 +304,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("Origin") != self.server.origin:
             self.json_response(403, {"error": "仅接受本机聊天页面发出的请求。"})
             return
-        routes = {"/api/pi/run", "/api/chat", "/api/clear", "/api/profile", "/api/chats/new", "/api/chats/open", "/api/chats/rename", "/api/chats/delete", "/api/tasks/add", "/api/tasks/toggle", "/api/tasks/delete"}
+        routes = {"/api/pi/run", "/api/chat", "/api/clear", "/api/profile", "/api/chats/new", "/api/chats/open", "/api/chats/rename", "/api/chats/delete", "/api/tasks/add", "/api/tasks/toggle", "/api/tasks/delete", "/api/tasks/fire"}
         routes.add('/api/memory')
         if self.path not in routes:
             self.json_response(404, {"error": "接口不存在。"})
@@ -499,7 +500,8 @@ class Handler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 pass
             return
-        reminder = self.server.store.reminder_chat(owner, chat, question)
+        factual_reminder = reminders.capability_answer(question)
+        reminder = factual_reminder if factual_reminder is not None else self.server.store.reminder_chat(owner, chat, question)
         if reminder is not None:
             reminder = addressed(reminder, profile.get("user_address", ""))
             self.headers_for(200, "application/x-ndjson; charset=utf-8")

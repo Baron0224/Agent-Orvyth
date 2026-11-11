@@ -572,3 +572,17 @@
 - 工具：Python 3 + unittest；本机 Ollama `qwen3:8b`；DeepSeek API（deepseek-flash，密钥仍走 DPAPI）；Edge headless + CDP 截图；Git。无新依赖。
 - 一句话总结：现在默认“自动”：闲聊、问事实、建文件找文件用本机，写代码、长文、分析推理自动切云端；每条回复都标出用的是哪个大脑，云端挂了会自己退回本机并告诉你。
 - 验证与状态：12 条样例逐条符合预期（闲聊/短问答/事实/文件 6 条本机；代码/长文/分析 6 条云端），同一对话第 11 条难→云端、第 12 条易→本机，未粘住云端；坏密钥实测先云端后自动回落本机且说明原因、无报错卡死。用量：6 次云端调用合计 prompt 5657（缓存命中 4608）+ completion 1027 ≈ 6684 tokens，约 ¥0.01 量级。全量 `discover` 185 项 = 3 failures + 2 errors + 1 skipped，与基线同源，无新增失败。测试文件已删、测试服务已停；未推 GitHub、未上线。
+
+## [2026-11-11] 提醒：到点自动归档、每日顺延、能力问句拦截、提示音
+- 先查了数据结构：`tasks` 表原来只有 `remind_time/start_date/end_date/last_done_date/due_at`，**没有专门的“重复”字段**，“每天”是靠 `end_date IS NULL` 表示。为了让“触发过没有”“错过了没有”可查，加了 `fired_at REAL`、`missed INTEGER`、`last_fire_date TEXT` 三列，旧库自动迁移（`training/browser_store.py:55`）。
+- 改了：`training/reminders.py:63-76,94-140` —— 新增 `REMIND`（提醒我/叫我/设个提醒）、`RECORD`（帮我记录/记一下/记着）、`CAPABILITY`（你会提醒我吗/能提醒我吗）三条正则；`capability_answer()` 统一回答“会，但前提是网页开着、开了桌面通知、浏览器和系统别静音”；`process_reminder` 先拦能力问句，再要求“事项内容 + 时间”同时具备，缺哪项只问哪项；回复统一带条件句 `CONDITION`，不再出现裸承诺。
+- 改了：`training/browser_store.py:110-140` 一次性状态计算 —— 到点后 10 分钟宽限内没触发，视为错过：写 `fired_at=due, missed=1` 并归档；`done = fired_at or last_done_date`，所以触发过的一次性事项自动进“已完成”，且保留原定时间。
+- 改了：`training/browser_store.py:127-135,277-302` 每日事项 —— `waiting` 覆盖“已过期/未开始/今天已触发/今天手动完成/未到点”，`remind_due` 只在“今天到点且今天还没触发/完成”时为真；`task_action` 新增 `fire`：一次性写 `fired_at`，每天写 `last_fire_date`（不进“已完成”，次日同一时间自动再响）。
+- 改了：`training/chat_web.py:307,504` —— 新增 `POST /api/tasks/fire`；`local_web_tasks` 没接住时仍交给 `store.reminder_chat`，所以“帮我记录每天晚上22:29熄灯”会进提醒链。
+- 改了：`training/browser/app.js:19-42,60-70,84,206-222,268-269` —— 新增 `playChime()`（WebAudio 合成两个音 880/1174.66Hz，间隔 0.16 秒，不依赖音频文件）；到点弹窗和桌面通知之外同时响铃，并 `POST /api/tasks/fire` 把事项归档/顺延；面板小字显示“已错过 · 原定 …”“每天 · 今天已提醒，明天 22:29”“已提醒 · 时间”；页面重开时若有错过事项，显示“有 N 条提醒在网页关闭时错过了，已标记‘已错过’并归档到已完成”。
+- 改了：`training/test_reminders.py` —— 新增 4 项回归（记录句建每日事项、能力问句一律不建、一次性 fire 后归档且保留触发时间、每日 fire 后顺延次日不进已完成），并把旧的“过期不归档”断言改成“过期即标已错过并归档”。
+- 因为：用户实测暴露了四个问题——提醒到点后仍挂在待办、每日重复没落地、带“记录”的句子掉进闲聊假承诺、“你会提醒我吗”被当成建事项；另外只有弹窗没有声音，容易错过。
+- 我能改：`training/reminders.py:63-68` 的三条正则和条件句文案；`training/browser/app.js:25-40` 的音高与时长；`training/browser_store.py:116` 的 600 秒宽限。改完跑 `cd training && python -m unittest test_reminders`。
+- 工具：Python 3 + unittest；本机 Ollama `qwen3:8b` 的真实 8775（隔离数据目录 `.preview/reminder-data`）；Edge headless + CDP（`--autoplay-policy=no-user-gesture-required`）；Git。无新依赖。
+- 一句话总结：现在提醒到点会弹窗、响一声并自动进“已完成”；说“每天22:29提醒我熄灯”会建每日事项，今天响过就顺延到明天；问“你会提醒我吗”只回答不建事项；网页关着错过的提醒，下次打开会标“已错过”并归档。
+- 验证与状态：`test_reminders` 15 项全过；全量 `discover` 189 项 = 3 failures + 2 errors + 1 skipped，与基线 3F+2E+1S 同源（live_news 1、chat_web 2、hermes_web 1、reply_limits 1），无新增失败。真实 8775 实测：a) “1分钟后提醒我喝水”→第 60 秒弹窗“时间到：喝水”，`AudioContext.state=running`（提示音已播放），事项自动进已完成、显示“已提醒 · 2026/11/11 17:28:24”；b) “每天22:29提醒我浇花”“帮我记录每天晚上22:29熄灯”→面板显示“每天 · 22:29”，手动 fire 后变成“每天 · 今天已提醒，明天 22:29”且未进已完成；c) 原话回复带“网页开着/别静音/开启桌面通知/响一声”条件；d) “你会提醒我吗”正常回答，事项数 0；另用手工插入的过期事项验证页面重开提示“有 1 条提醒在网页关闭时错过了”，列表显示“已错过 · 原定 16:30”。前提：网页必须保持打开、浏览器/系统不能静音；Windows 通知自身的声音归系统设置管，网页控制不了。截图 `.preview/reminder-popup.png`、`reminder-daily.png`、`reminder-capability.png`、`reminder-missed.png`。测试数据已清理；未推 GitHub、未上线。

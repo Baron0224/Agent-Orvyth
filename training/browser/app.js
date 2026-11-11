@@ -14,6 +14,29 @@ const notifier = window.OrvythNotifications.create({
   failed: () => { notificationStatus.textContent = '系统通知未能显示，请检查浏览器和电脑的通知设置。'; }
 });
 const shownReminders = new Set();
+let chimeContext = null;
+function chimeAudio() {
+  const Audio = window.AudioContext || window.webkitAudioContext;
+  if (!Audio) return null;
+  if (!chimeContext) chimeContext = new Audio();
+  if (chimeContext.state === 'suspended') chimeContext.resume().catch(() => {});
+  return chimeContext;
+}
+function playChime() {
+  const audio = chimeAudio(); if (!audio) return;
+  try {
+    const start = audio.currentTime;
+    [[880, 0], [1174.66, 0.16]].forEach(([frequency, delay]) => {
+      const tone = audio.createOscillator(), gain = audio.createGain();
+      tone.type = 'sine'; tone.frequency.value = frequency;
+      gain.gain.setValueAtTime(0.0001, start + delay);
+      gain.gain.exponentialRampToValueAtTime(0.16, start + delay + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + delay + 0.3);
+      tone.connect(gain).connect(audio.destination);
+      tone.start(start + delay); tone.stop(start + delay + 0.32);
+    });
+  } catch {}
+}
 function notificationSettings() {
   const permission = notifier.permission();
   notificationButton.hidden = permission === 'unsupported';
@@ -21,7 +44,7 @@ function notificationSettings() {
   notificationButton.textContent = permission === 'granted' ? '测试桌面通知' : '开启桌面通知';
   notificationStatus.textContent = permission === 'unsupported' ? '当前浏览器不支持桌面通知，可换用 Chrome 或 Edge。' :
     permission === 'denied' ? '通知被阻止，请在浏览器设置中允许。' :
-    permission === 'granted' ? '浏览器已允许通知。请点上方按钮测试，并确认电脑右下角是否出现通知。页面需保持打开。' : '点击开启后，请在浏览器的提示中选择允许；页面需保持打开。';
+    permission === 'granted' ? '浏览器已允许通知。请点上方按钮测试（会响一声提示音），并确认电脑右下角是否出现通知。页面需保持打开。' : '点击开启后，请在浏览器的提示中选择允许；页面需保持打开。';
 }
 function reminderKey(task) { return `${task.id}:${task.due_at ?? task.occurrence_date}`; }
 function showReminderPopup(tasks) {
@@ -42,6 +65,8 @@ function deliverReminders(tasks) {
     $('#task-notice').textContent = text;
     if (!busy) setPet('happy', text);
     showReminderPopup(fresh);
+    playChime();
+    fresh.forEach(task => requestJSON('/api/tasks/fire', {id: task.id}).then(applyState).catch(() => {}));
   }
   due.forEach(task => notifier.notify(task));
 }
@@ -56,9 +81,10 @@ notificationButton.addEventListener('click', async () => {
     notificationSettings();
     if (permission === 'granted') {
       notifier.retry();
-      const test = new Notification('Orvyth 通知已开启', {body:'提醒到时间时，会像这样弹出。', tag:'orvyth-notification-test'});
+      playChime();
+      const test = new Notification('Orvyth 通知已开启', {body:'提醒到时间时，会像这样弹出，并响一声提示音。', tag:'orvyth-notification-test'});
       test.onclick = () => { window.focus(); test.close(); };
-      test.onshow = () => { notificationStatus.textContent = '浏览器已发送测试，请确认电脑右下角是否真的出现通知。页面需保持打开。'; };
+      test.onshow = () => { notificationStatus.textContent = '浏览器已发送测试，请确认电脑右下角是否出现通知、是否听到提示音。页面需保持打开。'; };
       test.onerror = () => { notificationStatus.textContent = '测试通知未显示，请检查浏览器和电脑通知设置。'; };
       if (state) deliverReminders(state.tasks);
     }
@@ -186,9 +212,12 @@ function taskRow(task) {
   const title = document.createElement('span'); title.textContent = task.title; label.append(title);
   if (task.remind_time) {
     const detail = document.createElement('small'); detail.className = 'task-schedule';
-    const duration = task.end_date === task.start_date ? '一次' : (task.end_date ? `每天 · 至 ${task.end_date}` : '每天');
     const due = task.due_at ? new Date(task.due_at * 1000).toLocaleString('zh-CN', {hour12:false}) : task.remind_time;
-    detail.textContent = task.expired ? '周期已结束' : (task.waiting ? `等待 ${due} · ${duration}` : `${duration} · ${due}`);
+    if (task.missed) detail.textContent = `已错过 · 原定 ${due}`;
+    else if (task.daily) detail.textContent = task.last_fire_date === task.occurrence_date
+      ? `每天 · 今天已提醒，明天 ${task.remind_time}` : `每天 · ${task.remind_time}`;
+    else if (task.expired) detail.textContent = '周期已结束';
+    else detail.textContent = task.waiting ? `等待 ${due} · 一次` : `已提醒 · ${due}`;
     label.append(detail);
   }
   check.addEventListener('change', () => updateTask(task, 'toggle', {done:check.checked}));
@@ -236,6 +265,8 @@ async function initialize() {
     const data = await requestJSON('/api/session'); initialized = true; applyState(data, true);
     deliverReminders(data.tasks);
     await checkConnection();
+    const missed = data.tasks.filter(task => task.missed && task.done).length;
+    if (missed) setNotice(`有 ${missed} 条提醒在网页关闭时错过了，已标记“已错过”并归档到已完成。`);
   } catch (error) { setNotice(error.message || '连接失败，请刷新页面。'); $('#reconnect').hidden = false; }
   controls();
 }
