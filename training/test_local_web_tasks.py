@@ -30,6 +30,42 @@ class LocalTasksTests(unittest.TestCase):
                 self.assertIn('文件名不能', tasks.route('在桌面建一个文件，名字叫 ../越界.txt，里面写x')['reply'])
                 self.assertNotIn('local_text_write', tasks.route('不要在桌面创建文件，名字叫x，内容是y'))
 
+    def test_create_multiturn_absorbs_all_supported_phrasings(self):
+        scripts = [
+            ('在桌面创建一个文档写我爱你', ['文档名字是你好内容我爱你']),
+            ('在桌面建一个文档', ['名字叫你好，内容是我爱你']),
+            ('在桌面建一个文档', ['文件名：你好，内容：我爱你']),
+            ('在桌面建一个文档', ['名字是你好', '内容是我爱你']),
+        ]
+        for opening, answers in scripts:
+            with self.subTest(opening=opening, answers=answers), tempfile.TemporaryDirectory() as directory:
+                with patch.object(tasks, 'desktop_folder', return_value=Path(directory)), patch('file_write.desktop_folder', return_value=Path(directory)):
+                    plan = tasks.route(opening, None)
+                    self.assertIn('还缺', plan['reply'])
+                    state = plan['file_lookup']
+                    for answer in answers:
+                        plan = tasks.route(answer, state)
+                        self.assertNotIn('没认出来', plan.get('reply', ''))
+                        state = plan.get('file_lookup', state)
+                    self.assertIn('local_text_write', plan)
+                    slots = plan['local_text_write']
+                    self.assertEqual(slots['name'], '你好.txt')
+                    self.assertEqual(slots['content'], '我爱你')
+                    self.assertEqual(slots['path'], str((Path(directory) / '你好.txt').resolve()))
+                    tasks.create_text(slots, lambda *step: None)
+                    self.assertEqual((Path(directory) / '你好.txt').read_text(encoding='utf-8'), '我爱你')
+
+    def test_first_turn_content_is_not_asked_again(self):
+        plan = tasks.route('在桌面创建一个文档写我爱你', None)
+        self.assertIn('还缺文件名', plan['reply'])
+        self.assertNotIn('要写入的内容', plan['reply'])
+
+    def test_unparsed_answer_asks_with_example(self):
+        plan = tasks.route('在桌面建一个文档')
+        again = tasks.route('文档名就按那个吧', plan['file_lookup'])
+        self.assertIn('可以这样说', again['reply'])
+        self.assertIn('名字叫你好', again['reply'])
+
     def test_create_with_bare_jian_and_bare_filename(self):
         plan = tasks.route('在桌面建 x测试.txt，里面写内容', None)
         self.assertIn('local_text_write', plan)

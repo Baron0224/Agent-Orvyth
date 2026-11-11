@@ -253,15 +253,19 @@ def route(question, context=None):
         prompt += '收件人信息还需核对。我目前没有发送工具，只能帮你定位和准备，不能替你发出。'
         state['local_task']['prompt'] = prompt
         return _reply(prompt, state)
-    if creating or (pending and task.get('action') == 'create' and re.search(r'名字|文件名|内容|写入|里面写|桌面|[A-Za-z]:[\\/]', question)):
+    if creating or (pending and task.get('action') == 'create' and re.search(r'名字|文件名|文档名|内容|正文|写入|里面写|桌面|[A-Za-z]:[\\/]', question)):
         slots = dict(task.get('slots', {})) if pending and task.get('action') == 'create' else {}
+        before = dict(slots)
         if '桌面' in question:
             slots['desktop'] = True
-        content = re.search(r'(?:里面写|里边写|里写|写入|写上|写下|内容(?:是|为))[：:\s]*(.*)', question, re.S)
+        content = (re.search(r'(?:里面写|里边写|里写|写入|写上|写下)[：:\s]*(.*)', question, re.S)
+                   or re.search(r'(?:内容|正文)\s*(?:是|为|：|:)?\s*(.*)', question, re.S)
+                   or re.search(r'(?:文档|文件|文本)[，,\s]*写(?![个])\s*(.*)', question, re.S))
         head = question[:content.start()] if content else question
-        name = re.search(r'(?:名字叫|命名为|名为|叫做|文件名(?:为|是)?|叫)[：:\s]*([^，,；;\n]+)', head)
+        name = (re.search(r'(?:文档|文件|文本)?名(?:字)?\s*(?:叫|是|为|：|:)\s*([^，,；;。\n]+)', head)
+                or re.search(r'(?:命名为|叫做)\s*([^，,；;。\n]+)', head))
         if name:
-            slots['name'] = name[1].strip().strip('"“”`')
+            slots['name'] = name[1].strip().strip('"“”「」`')
         else:
             token = re.search(r'([\w一-鿿()（）\-]+\.(?:txt|md|docx?|xlsx?|csv|py|json))', head)
             if token:
@@ -285,6 +289,8 @@ def route(question, context=None):
             missing.append('保存目录（或说桌面）')
         if missing:
             prompt = '还缺' + '、'.join(missing) + '，其余已提供的信息会保留。'
+            if pending and slots == before:
+                prompt += ' 这次补充没认出来，可以这样说：名字叫你好，内容是我爱你。'
             state['local_task']['prompt'] = prompt
             return _reply(prompt, state)
         try:
