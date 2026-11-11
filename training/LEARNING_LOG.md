@@ -586,3 +586,15 @@
 - 工具：Python 3 + unittest；本机 Ollama `qwen3:8b` 的真实 8775（隔离数据目录 `.preview/reminder-data`）；Edge headless + CDP（`--autoplay-policy=no-user-gesture-required`）；Git。无新依赖。
 - 一句话总结：现在提醒到点会弹窗、响一声并自动进“已完成”；说“每天22:29提醒我熄灯”会建每日事项，今天响过就顺延到明天；问“你会提醒我吗”只回答不建事项；网页关着错过的提醒，下次打开会标“已错过”并归档。
 - 验证与状态：`test_reminders` 15 项全过；全量 `discover` 189 项 = 3 failures + 2 errors + 1 skipped，与基线 3F+2E+1S 同源（live_news 1、chat_web 2、hermes_web 1、reply_limits 1），无新增失败。真实 8775 实测：a) “1分钟后提醒我喝水”→第 60 秒弹窗“时间到：喝水”，`AudioContext.state=running`（提示音已播放），事项自动进已完成、显示“已提醒 · 2026/11/11 17:28:24”；b) “每天22:29提醒我浇花”“帮我记录每天晚上22:29熄灯”→面板显示“每天 · 22:29”，手动 fire 后变成“每天 · 今天已提醒，明天 22:29”且未进已完成；c) 原话回复带“网页开着/别静音/开启桌面通知/响一声”条件；d) “你会提醒我吗”正常回答，事项数 0；另用手工插入的过期事项验证页面重开提示“有 1 条提醒在网页关闭时错过了”，列表显示“已错过 · 原定 16:30”。前提：网页必须保持打开、浏览器/系统不能静音；Windows 通知自身的声音归系统设置管，网页控制不了。截图 `.preview/reminder-popup.png`、`reminder-daily.png`、`reminder-capability.png`、`reminder-missed.png`。测试数据已清理；未推 GitHub、未上线。
+
+## [2026-11-11] 提醒修复：新请求优先、到点 10 秒服务端兜底归档、静态资源版本号
+- 根因（BUG B，先查后改）：真实账户库里这条“做我要做的什么”的 `due_at`=17:34:56，`fired_at`=17:37:49——触发回报比到点晚了 173 秒，正好是页面重新加载的时刻；截图 17:36 它还在待办，说明当时那个标签页跑的是**服务重启前加载的旧 app.js**（不会 `POST /api/tasks/fire`），而服务端当时只有“错过超过 10 分钟才归档”一条兜底（`training/browser_store.py`），所以一直挂着。对照证据：重启后新建的“喝水”`due_at`=17:38:01、`fired_at`=17:38:04，只晚 3 秒就归档。排除磁盘缓存：静态响应本来就带 `Cache-Control: no-store`；问题是“已经打开的旧页面”不刷新就一直跑旧代码。
+- 改了：`training/browser_store.py:110-125` —— 一次性事项在“页面轮询（说明网页开着）”且到点满 10 秒后，服务端直接写 `fired_at=due, missed=0` 归档，不再单靠前端回报；页面关着仍走原来的 10 分钟“已错过”规则。
+- 改了：`training/browser/index.html:6` 给 `app.js`、`reminder-notifications.js`、`styles.css` 加 `?v=20261111c`；`training/chat_web.py:242-299` 静态路由先 `urlsplit(self.path).path` 再匹配，带版本参数的地址不再 404。用户侧只需要普通刷新（F5），不用清缓存；旧页面刷新一次就会拿到新代码。
+- 改了：`training/reminders.py:94-103` —— 新请求优先：待补参时，如果新句子带“提醒我 + 新事项”，且新事项和旧槽位不同，就丢弃旧槽位、按新请求重建；只有纯时间补充（如“5秒后”“明早8点”不带新事项）才继续填旧槽位。这样“5秒后提醒我喝水”不会再被上一轮的“做我要做的什么”吞掉。
+- 改了：`training/test_reminders.py` —— 新增 3 项：新请求优先（旧槽位“做我要做的什么”+ 新句“5秒后提醒我喝水”→ 事项标题必须是“喝水”）；纯时间补充仍填旧槽位；服务端在到点 10 秒后仅靠 `/api/session` 轮询就归档（无需前端 fire）。
+- 因为：用户真账户实测两处 bug——补时间时把新事项吞了、到点后不自动进已完成。上一轮只在隔离环境验证过，没覆盖“页面是重启前打开的”这条真实路径。
+- 我能改：`training/browser_store.py` 里的 `due + 10`（给通知留的秒数）和 `due + 600`（错过的宽限）；`training/reminders.py` 里“新请求优先”的判定；`training/browser/index.html:6` 的版本号后缀（每次改前端都可以换一个）。改完跑 `cd training && python -m unittest test_reminders`。
+- 工具：Python 3 + unittest；真实 8775（默认数据目录，普通页面路径）；Edge headless + CDP；Git。无新依赖。
+- 一句话总结：现在“5秒后提醒我喝水”会建“喝水”而不是接着上一句；到点后最多十几秒就自动进“已完成”；就算你开着的是重启前的旧页面，服务端也会替你归档，刷新一次就换成新界面。
+- 验证与状态：`test_reminders` 18 项全过；全量 `discover` 192 项 = 3 failures + 2 errors + 1 skipped，与基线 3F+2E+1S 同源（live_news 1、chat_web 2、hermes_web 1、reply_limits 1），无新增失败。真实路径复测（默认数据目录、正常打开页面）：第一句“提醒我做我要做的什么”→只问几点、未建事项；第二句“5秒后提醒我喝水”→建“喝水”17:42:38，5 秒内进已完成（`fired_at` 17:42:39，`missed=0`），面板“已完成 (1) 喝水 已提醒 · 2026/11/11 17:42:38”，弹窗“时间到：喝水”；另用不带前端 fire 的轮询验证：到点 +12 秒 `done=1`、`fired_at==due`、`missed=0`。截图 `.preview/reminder-fix.png`。测试账号已删；桌面未新建文件；未推 GitHub、未上线。

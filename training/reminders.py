@@ -93,6 +93,12 @@ def _title_of(text):
 
 def process_reminder(text, draft, now):
     text = text.strip()
+    # 新请求优先：带“提醒我 + 新事项”的句子不能拿时间去补旧槽位。
+    new_title = _title_of(text) if REMIND.search(text) else None
+    if draft is not None and new_title:
+        previous = (draft.get('title') or '').strip()
+        if not previous or new_title != previous:
+            draft = None
     relative = read_relative(text)
     wants = bool(REMIND.search(text) or RECORD.search(text) or re.search(r'(?:帮我|我要|我想|我需要).{0,12}打卡', text))
     if relative is not None and (draft is not None or re.search(r'提醒我|(?:帮我|我要|我想|我需要).{0,12}打卡', text)):
@@ -115,7 +121,7 @@ def process_reminder(text, draft, now):
         if not REMIND.search(text) and not read_time(text) and read_duration(text) is None and relative is None and '打卡' not in text:
             return None
         draft = {'title': None, 'time': None, 'days': None, 'start': None}
-        draft['title'] = _title_of(text)
+        draft['title'] = new_title or _title_of(text)
     else:
         draft = dict(draft)
         if re.fullmatch(r'取消|算了|不设置了|不用了', text):

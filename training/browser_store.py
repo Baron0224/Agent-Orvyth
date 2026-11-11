@@ -117,6 +117,11 @@ class Store:
                             db.execute("UPDATE tasks SET fired_at=?, missed=1 WHERE id=? AND owner=?", (due, item["id"], owner))
                             item["fired_at"] = due
                             item["missed"] = 1
+                        elif not item["fired_at"] and not item["last_done_date"] and now.timestamp() >= due + 10:
+                            # 页面正在轮询（说明网页开着）：到点 10 秒后服务端兜底归档，不单靠前端回报。
+                            db.execute("UPDATE tasks SET fired_at=?, missed=0 WHERE id=? AND owner=?", (due, item["id"], owner))
+                            item["fired_at"] = due
+                            item["missed"] = 0
                         item["done"] = int(bool(item["fired_at"] or item["last_done_date"]))
                         item["waiting"] = not item["done"] and now.timestamp() < due
                         item["expired"] = False

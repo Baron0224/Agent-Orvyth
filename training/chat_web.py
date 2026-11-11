@@ -241,6 +241,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.valid_host():
             return
+        route = urlsplit(self.path).path
         if urlsplit(self.path).path=='/api/file-preview':
             try:
                 _,owner=self.owner()
@@ -282,17 +283,17 @@ class Handler(BaseHTTPRequestHandler):
             "/companion3d/vendor/three.module.js": ASSETS.parent / "companion-preview" / "dog" / "3d" / "vendor" / "three.module.js",
             "/companion3d/vendor/three.core.js": ASSETS.parent / "companion-preview" / "dog" / "3d" / "vendor" / "three.core.js",
         }
-        if self.path in companion_files:
-            body = companion_files[self.path].read_bytes()
+        if route in companion_files:
+            body = companion_files[route].read_bytes()
             self.headers_for(200, "text/javascript; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
             return
-        if self.path not in assets:
+        if route not in assets:
             self.json_response(404, {"error": "页面不存在。"})
             return
-        filename, content_type = assets[self.path]
+        filename, content_type = assets[route]
         body = (ASSETS / filename).read_bytes()
         self.headers_for(200, content_type if content_type.startswith("image/") else content_type + "; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))

@@ -162,6 +162,34 @@ class ReminderTest(unittest.TestCase):
             self.assertTrue(next_day['remind_due'])
             self.assertFalse(next_day['done'])
 
+    def test_new_request_wins_over_pending_draft(self):
+        draft = {'title': '做我要做的什么', 'time': None, 'days': None, 'start': None}
+        reply, next_draft, task = process_reminder('5秒后提醒我喝水', draft, moment(2, 9))
+        self.assertIsNone(next_draft)
+        self.assertEqual(task['title'], '喝水')
+        self.assertIn('喝水', reply)
+        self.assertEqual(task['time'], moment(2, 9).strftime('%H:%M'))
+
+    def test_pure_time_supplement_still_fills_the_draft(self):
+        draft = {'title': '喝水', 'time': None, 'days': None, 'start': None}
+        reply, next_draft, task = process_reminder('5秒后', draft, moment(2, 9))
+        self.assertIsNone(next_draft)
+        self.assertEqual(task['title'], '喝水')
+        self.assertEqual(task['time'], (moment(2, 9) + timedelta(seconds=5)).strftime('%H:%M'))
+
+    def test_server_archives_ten_seconds_after_due_without_frontend_fire(self):
+        self.store.reminder_chat(self.owner, self.chat, '1分钟后提醒我喝水')
+        task = self.store.state(self.owner)['tasks'][0]
+        with patch('browser_store.local_now', return_value=moment(2, 12, 1)):
+            early = self.store.state(self.owner)['tasks'][0]
+            self.assertFalse(early['done'])
+            self.assertTrue(early['remind_due'])
+        with patch('browser_store.local_now', return_value=moment(2, 12, 2)):
+            archived = self.store.state(self.owner)['tasks'][0]
+            self.assertTrue(archived['done'])
+            self.assertEqual(archived['missed'], 0)
+            self.assertAlmostEqual(archived['fired_at'], task['due_at'], places=3)
+
     def test_time_parser(self):
         self.assertEqual(read_time('下午一点半'), '13:30')
         self.assertEqual(read_time('13:00'), '13:00')
