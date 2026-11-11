@@ -517,8 +517,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write((json.dumps(event, ensure_ascii=False)+"\n").encode('utf-8'))
                 self.wfile.flush()
             if 'memory' in plan or 'reply' in plan:
+                if plan.get('task_state')=='failed':
+                    trace=TaskTrace(emit)
+                    trace.finish('failed',plan.get('task_reason') or '要读取的内容没有取到，任务未完成。')
                 answer=self.server.memory.command(owner,plan['memory']) if 'memory' in plan else plan['reply']
-                answer=self.server.store.save_pair(owner,chat,question,answer,search_evidence=plan.get('file_lookup'))
+                answer=self.server.store.save_pair(owner,chat,question,answer,search_evidence=plan.get('file_lookup'),**({'task_trace':trace.data} if trace else {}))
                 emit({'type':'delta','content':answer})
                 if plan.get('file_lookup'):
                     message,evidence=self.server.store.candidate_record(owner,chat)
@@ -544,7 +547,7 @@ class Handler(BaseHTTPRequestHandler):
                             trace.tool(event,plan['folder']);tools+=1
                     if not settled or not tools or not ''.join(chunks).strip():
                         raise RuntimeError('没有获得完整的工具执行结果，任务未确认完成。')
-                    answer=''.join(chunks)
+                    answer=trace.reconcile(''.join(chunks),plan.get('only_file'))
                     trace.step('工具执行已结束，回答依据已读取的资料生成')
                 trace.finish('completed','执行检查通过')
                 answer=self.server.store.save_pair(owner,chat,question,answer,task_trace=trace.data,search_evidence=plan.get('file_lookup'))

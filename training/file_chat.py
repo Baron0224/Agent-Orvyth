@@ -110,9 +110,11 @@ def file_request(question, history, context=None):
         elif target.is_dir():
             folder, only_file = target, None
         else:
-            return {'reply': '这个路径不是普通文件或文件夹，请重新确认。'}
+            return {'reply': '这个路径不是普通文件或文件夹，请重新确认。',
+                    'task_state': 'failed', 'task_reason': '这个路径不是普通文件或文件夹。'}
     except (OSError, ValueError):
-        return {'reply': '我没找到这个文件或文件夹。请检查路径，再把完整路径发给我。'}
+        return {'reply': '我没找到这个文件或文件夹。请检查路径，再把完整路径发给我。',
+                'task_state': 'failed', 'task_reason': '没有找到要读取的文件或文件夹。'}
     task = f'用户要求：{original}\n本轮补充：{original_question}\n已定位来源：{target}\n'
     task += f'请先调用 read_project 读取 {only_file!r}，再根据实际内容回答。' if only_file else '请先调用 list_project 查看目录，再按要求读取相关文本。'
     return {'folder':str(folder), 'task':task, 'only_file':only_file}

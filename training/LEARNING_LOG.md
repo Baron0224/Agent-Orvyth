@@ -499,3 +499,15 @@
 - 测试纪律：隔离回归初次因桌面函数未双重替换误写本轮同名桌面fixture，已修测试隔离。核对2026-11-10 23:09:13创建/修改时间与内容哈希后，将仅此本轮自建文件备份到独立测试目录（跨盘rename未成功，后用原生Move-Item完成，未覆盖或删除用户旧文件）。之后真实网页23:14:14重新创建桌面测试文件，二者分开计证据。没有修改真实项目或档案原文。
 - 验证：最终16项针对性隔离回归通过，git diff --check通过；隔离回归不冒充原账户实测。启动仅显式指定原默认模型qwen3:8b与8775，无持久配置改动。测试产物为桌面网页新建文本，以及仓库外独立测试目录的回归备份文本、两张PNG。
 - 一句话总结：本地网页能按已给参数实际建文件、列出候选并在重启后续接选择，空档案和Pi读后错误回答仍明确保留为未解决问题。
+
+
+## [2026-11-11] 完成判定以工具记录为准，回答与记录矛盾不再标完成
+- 改了：`training/task_trace.py:1-78` —— 任务证据；`data` 新增 `tools` 列表，`tool()` 成功确认后记录 `{name,path}`，新增 `reads()` 只筛 `read_project`（`list_project` 不再能冒充读取）。新增 `reconcile(answer, only_file=None)`：任务指定文件却无读取记录 → 抛错；无读取记录而答复声称“已读取/读到了/读取成功” → 抛错；有读取记录而答复称“无法读取/读不到/打不开/没有权限/没找到”且目标为不超过 12000 字的 UTF-8 文本 → 改用工具实际读到的原文生成答复并追加步骤“最终回答与读取记录不一致，已改用工具实际读取的内容”，其他情况抛错标失败，绝不带着矛盾标完成。
+- 改了：`training/chat_web.py:519-523,547-549` —— 网页文件任务；纯回复分支遇到 `task_state=failed` 先建 TaskTrace 并 `finish('failed',…)`，任务面板显示失败而不是普通聊天；Pi 分支在 `settle/tools/非空` 原检查之后调用 `trace.reconcile(...)`，一致性不过就进入原失败分支（`任务未完成：…`、`trace.finish('failed')`、保存失败状态）。
+- 改了：`training/file_chat.py:113-117` —— 路径失败回复；找不到文件/不是普通文件时附带 `task_state='failed'` 与 `task_reason`，页面据此显示未完成；正常定位返回不变。
+- 改了：`training/test_task_consistency.py:1-113` —— 9 项新回归；5 项 TaskTrace 单元（矛盾答复改用真实原文、一致答复原样保留、无读取记录却称已读、只列目录不算读、读到的不是可解码文本）+ 4 项真实 HTTP（缺文件 failed、读了但答复称读不到仍展示真实内容且 completed、只 list 却称已读 failed、正常读取 completed 并写入数据库 task_trace）。
+- 因为：第一轮真实矛盾（工具记录三次读取、模型答“无法读取”、页面标完成）根因是完成判定只看“有 settled、有工具事件、有非空文字”，而 `list_project` 也计入成功读取，且答复与记录从未比对；只在提示词里要求模型诚实无法兜住小模型的偶发翻车，必须在服务端用磁盘证据裁决。
+- 我能改：`training/task_trace.py:7-9` 的失败/成功措辞正则（误判时可增删词），`:12` 的 `MAX_EVIDENCE` 12000 字上限；`training/file_chat.py:114,117` 与 `training/chat_web.py` 失败分支的用户可见文案。改完执行 `cd training && python -m unittest test_task_consistency` 即可复验。
+- 工具：Python 3 + unittest + 临时目录真实 HTTP 请求（`test_chat_web.WebChatTest` 原样复用）；本机 Ollama `qwen3:8b` 的真实 8775 服务（`--data-dir` 指向临时目录，未碰默认账户数据库）；Git。无新依赖、无付费 API、无子代理。
+- 一句话总结：从今以后“完成”只认磁盘上的真实读取记录，模型嘴上说读不到而记录显示读了，页面会直接给出真实内容；真读不到就如实标失败。
+- 验证与状态：新 9 项全过（2.5 秒）。第一轮 16 项针对性回归逐项通过：`test_memory_file_read` 1、`test_pending_memory` 1、`test_candidate_selection` 1、`test_file_chat` 9、`test_hermes_memory` 4；另 `test_local_web_tasks` 5 项也通过。旧接续用例 `test_project_lookup.test_no_hit_missing_artifact_and_legacy_prompt` 仍为 ERROR（`plan` 为 None，第 99 行 `plan['file_lookup']` TypeError），属 `training/file_chat.py:35-36` 既有路由判定，本轮范围为完成判定、未改，如实报未过。全量 `discover` 149 项：3 failures + 3 errors + 1 skipped，与改动前 140 项基线逐项同源（live_news 1、chat_web 2、hermes_web/project_lookup/reply_limits 各 1），无新增失败。真实 8775（临时数据目录、chat/tool 均 qwen3:8b）：`读取"C:\Users\穆柏润\OneDrive\桌面\orvyth测试.txt"的内容` → 18.4 秒 completed，答复“文件内容是「核心路径实测」”，步骤含“已读取文件”；`读取"…\不存在的文件xyz.txt"的内容` → 0.1 秒 failed，答复“我没找到这个文件或文件夹”，未编造内容。口语化“读取桌面上的 orvyth测试.txt 的内容”先返回 5 个候选（同名/同前缀散落多处），回“3”选中桌面文件后 completed 并读出「核心路径实测」——两步流程，未自动猜。`git diff --check` 通过。本轮只使用临时数据目录，未读取用户真实长期档案原文、未迁移或删除任何档案、未改云端版与终端、未重启用户正在用的服务；本次已本地提交，未推 GitHub、未上线。
