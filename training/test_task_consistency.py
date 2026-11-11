@@ -70,7 +70,8 @@ class StreamConsistencyTests(unittest.TestCase):
 
     def test_missing_file_is_reported_failed(self):
         events = self.send(f'读取"{Path(self.directory.name) / "没有这个文件.txt"}"')
-        self.assertIn('我没找到这个文件或文件夹', ''.join(event.get('content', '') for event in events))
+        # 口吻定版（VOICE.md v1）：失败告知改为“这个路径我没找到…”，信息要素不变。
+        self.assertIn('这个路径我没找到', ''.join(event.get('content', '') for event in events))
         self.assertEqual(self.last_task(events)['state'], 'failed')
         self.assertEqual(self.web.state()['messages'][-1]['task_trace']['state'], 'failed')
 

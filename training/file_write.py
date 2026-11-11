@@ -3,6 +3,8 @@ import os
 from pathlib import Path
 import re
 
+import voice
+
 def desktop_folder():
     if os.name=='nt':
         import winreg
@@ -31,11 +33,11 @@ def write_request(question):
     if not ('桌面' in question and re.search(r'创建|新建|建立|建个|建一个',question) and re.search(r'文件|文档|文本',question)):
         return None
     if re.search(r'不要(?:在|创建|新建)|别(?:创建|新建)|先不(?:创建|新建)',question):
-        return {'reply':'好，这次先不创建文件。'}
+        return {'reply':'行，这次先不建了。'}
     name_match=re.search(r'(?:名字叫|命名为|名为|叫做|叫|文件名(?:为|是)?)[：:\s]*(.+?)(?=[，,；;\n]|(?:文档|文件)?(?:里面|里边|里)(?:写|面)|写入|写上|内容(?:是|为)|$)',question)
     content_match=re.search(r'(?:写入|写上|写下|内容(?:是|为))[：:\s]*(.+)',question,re.S)
     if not name_match or not content_match:
-        return {'reply':'可以创建桌面文本文件。请把文件名和内容一起告诉我，例如：在桌面新建文档，名字叫“你好”，内容是“我爱你”。'}
+        return {'reply':'桌面文本文件可以建，请把文件名和内容一起告诉我，比如：在桌面新建文档，名字叫“你好”，内容是“我爱你”。'}
     content=content_match[1].strip()
     quoted=re.fullmatch(r'["“「`](.*?)["”」`](?:[吗呢]?[？?。！!]*)',content,re.S)
     if quoted: content=quoted[1]
@@ -57,8 +59,8 @@ def create_text_file(request, on_step=None):
             file.write(request['content'])
     except FileExistsError:
         if on_step: raise FileExistsError(f'桌面已有“{name}”，没有覆盖。请换一个文件名。')
-        return f'桌面已经有“{name}”，我没有覆盖它。请换一个文件名再创建。'
+        return voice.file_exists(name)
     if target.read_text(encoding='utf-8') != request['content']:
         raise OSError('文件已写入，但重新读取的内容不一致，请检查文件。')
     if on_step: on_step('已重新读取核对，内容一致',str(target))
-    return f'已经在桌面创建“{name}”。\n保存位置：{target}\n内容：\n{request["content"]}'
+    return voice.file_created(str(target), request['content'], target.parent == folder)

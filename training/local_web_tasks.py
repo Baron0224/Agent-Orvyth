@@ -10,6 +10,7 @@ import re
 from file_lookup import SKIP, display_path, normalize, search_roots
 from file_write import clean_name, create_text_file, desktop_folder
 from project_lookup import named_project
+import voice
 
 TASK_VERSION = 1
 MAX_CANDIDATES = 8
@@ -73,7 +74,7 @@ def personal_write(memory, owner, question):
     try:
         existing = {item['content'] for item in memory.entries(owner)}
     except (OSError, ValueError):
-        return '当前账户档案暂时无法读取，这次没有保存。'
+        return voice.fact_unreadable(True)
     saved, repeated, rejected = [], [], []
     for clause, category in facts:
         if clause in existing:
@@ -90,25 +91,19 @@ def personal_write(memory, owner, question):
     except (OSError, ValueError):
         total = None
     if saved:
-        lines = ['已存入当前账户的长期档案（只在本机）：']
-        lines += ['- [' + LABELS[k] + '] ' + c for c, k in saved]
-        if total is not None:
-            lines.append('当前账户档案共 ' + str(total) + ' 条记录。')
-        if repeated:
-            lines.append('已在档案里、没有重复写入：' + '；'.join(repeated))
-        return '\n'.join(lines)
+        return voice.fact_saved([(LABELS[k], c) for c, k in saved], total, repeated)
     if repeated and not rejected:
-        return '这些内容之前已经存进当前账户的长期档案，没有重复写入：' + '；'.join(repeated)
+        return voice.fact_duplicate(repeated)
     if rejected:
-        return '这些内容没有写入长期档案：' + '；'.join(c + '（' + r + '）' for c, r in rejected)
+        return voice.fact_rejected(rejected)
     return None
 
 
-def personal_reply(memory, owner, question):
+def personal_reply(memory, owner, question, address=''):
     if memory.is_command(question):
         return None
     if re.search(r'我|本人|档案', question) and re.search(r'密码|验证码|密钥', question):
-        return '档案里没有可用于回答的密码记录。我不会保存或展示凭据，请通过对应服务的官方渠道处理。'
+        return voice.no_password()
     topics = []
     if re.search(r'我叫(?:什么|啥)|我的?(?:真实)?(?:姓名|名字)', question):
         topics.append(('姓名', r'(?:真实姓名|姓名|我的名字是|我叫)\s*[：:是]?\s*([^，。；;\n]+)'))
@@ -120,26 +115,34 @@ def personal_reply(memory, owner, question):
     try:
         entries = memory.entries(owner)
     except (OSError, ValueError):
-        return '当前账户档案暂时无法读取，这次不能确认个人信息。'
+        return voice.fact_unreadable(False)
     if ordinary and not topics:
         # An unstructured archive is not a licence to infer an unnamed personal fact.
         label = ordinary[1]
         if re.search(r'文件|路径|目录|项目|模型|任务|记忆|档案', label):
             return None
         topics = [(label, re.escape(label) + r'\s*[：:是]\s*([^，。；;\n]+)')]
-    answers = []
+    found = []
+    extra = []
     for label, pattern in topics:
         values = {m[1].strip() for item in entries for m in re.finditer(pattern, item['content'])}
         if label == '姓名':
             values = {v for v in values if not re.search(r'学校|学院|大学|学生|大[一二三四]|\d|密码|密钥', v)}
         values = {v for v in values if not re.search(r'密码|密钥|验证码', v)}
         if len(values) == 1:
-            answers.append(label + '：' + next(iter(values)))
+            found.append((label, next(iter(values))))
         elif values:
-            answers.append(label + '：档案里有多条不同记录，需要你确认，不能替你选。')
+            extra.append(voice.fact_multiple(label, address))
         else:
-            answers.append(label + '：当前账户档案里没有能确认的记录。')
-    return '\n'.join(answers)
+            extra.append(voice.fact_missing(label, address))
+    parts = [voice.fact_answers(found, address)] if found else []
+    parts.extend(extra)
+    result = ' '.join(parts)
+    head = voice.call(address)
+    if head and result.count(head) > 1:
+        first = result.find(head) + len(head)
+        result = result[:first] + result[first:].replace(head, '')
+    return result
 
 
 def _quoted_paths(text):
@@ -210,31 +213,31 @@ def route(question, context=None):
     if (sending or creating or finding) and re.search(r'不要|别(?:创建|新建|找|发)|先不(?:创建|新建|找|发)', question):
         state = _state('cancel')
         state['local_task']['phase'] = 'cancelled'
-        return _reply('这轮先不执行文件操作。', state)
+        return _reply('行，这轮先不动文件。', state)
     if short in ('取消', '算了', '先不做了') and task:
         state = {**context, 'local_task': {**task, 'phase': 'cancelled'}}
-        return _reply('已停止这项文件任务。', state)
+        return _reply('好，这项文件任务停下了。', state)
     if short in ('继续', '接着做', '继续刚才的任务'):
         if not task or task.get('phase') == 'cancelled':
-            return _reply('当前聊天没有可接续的文件任务。告诉我要继续哪件事。', _state('clarify'))
+            return _reply('这会儿没有可接续的文件任务，你想继续哪件？', _state('clarify'))
         if context.get('paths'):
-            return _candidates(context, '接着上次的文件任务；候选顺序和选择保持不变：')
+            return _candidates(context, '接着上次的来，候选顺序和选择都没变：')
         if task['action'] == 'create' and task.get('phase') == 'completed':
             path = Path(task['slots']['path'])
             return _reply('上次创建的文件：`' + str(path) + '`。' + ('文件仍存在；没有再次创建或覆盖。' if path.is_file() else '文件现在不存在，不能说它仍可用。'), context)
-        return _reply(task.get('prompt', '请补充这项任务缺少的参数。'), context)
+        return _reply(task.get('prompt', '还差点信息，你补一句我就接着做。'), context)
     if context.get('kind') == 'file_lookup' and task and not (sending or creating or finding):
         selection = re.fullmatch(r'(?:选|选择|预览|看)?第?([0-9]+|[一二三四五六七八])(?:个|项|张|张图|个文件)?', short)
         if selection:
             index = int(selection[1]) - 1 if selection[1].isdigit() else '一二三四五六七八'.index(selection[1])
             if not 0 <= index < len(context.get('paths', [])):
-                return _candidates(context, '请指定列表内的一个序号：')
+                return _candidates(context, voice.bad_index())
             state = {**context, 'selected_index': index,
                      'local_task': {**task, 'phase': 'selected'}}
-            return _candidates(state, '已选中第' + str(index + 1) + '个候选；仅定位名称，尚未读取内容：')
+            return _candidates(state, voice.selected(index + 1))
         if short in ('返回候选列表', '不是这个', '不对', '返回列表'):
             return _candidates({**context, 'selected_index': None,
-                                'local_task': {**task, 'phase': 'candidates'}}, '原候选列表如下：')
+                                'local_task': {**task, 'phase': 'candidates'}}, voice.candidates_again())
     pending = task.get('phase') == 'needs_input'
     if sending or (pending and task.get('action') == 'send' and (paths or re.search(r'邮箱|邮件|微信|QQ|渠道|收件人', question))):
         slots = dict(task.get('slots', {})) if pending and task.get('action') == 'send' else {}
@@ -288,9 +291,9 @@ def route(question, context=None):
         if not any(slots.get(k) for k in ('desktop', 'path', 'folder')):
             missing.append('保存目录（或说桌面）')
         if missing:
-            prompt = '还缺' + '、'.join(missing) + '，其余已提供的信息会保留。'
+            prompt = '还缺' + '、'.join(missing) + '，别的我先给你留着。'
             if pending and slots == before:
-                prompt += ' 这次补充没认出来，可以这样说：名字叫你好，内容是我爱你。'
+                prompt += voice.parse_miss()
             state['local_task']['prompt'] = prompt
             return _reply(prompt, state)
         try:
@@ -329,9 +332,8 @@ def route(question, context=None):
                      selected_index=None, match='name_only', status='limited' if limited else 'searched')
         state['local_task']['phase'] = 'candidates' if hits else 'needs_input'
         if hits:
-            return _candidates(state, '找到名称候选，尚未核实内容：')
-        prompt = '在这些目录按名称片段“' + fragment + '”没有找到文件：' + '、'.join(map(str, roots)) + '。'
-        prompt += '搜索受时间、深度、数量或权限限制，不能断言其他位置没有。请补充下一步要查的目录。'
+            return _candidates(state, voice.candidates_head())
+        prompt = voice.no_file(fragment, '、'.join(display_path(p) for p in roots))
         state['local_task']['prompt'] = prompt
         return _reply(prompt, state)
     return None
@@ -344,7 +346,7 @@ def _candidates(state, prefix):
     if selected is not None:
         text += '\n图片可使用下方预览；文本目前没有图片预览。可说“返回候选列表”。'
     else:
-        text += '\n请指定序号。搜索范围：' + '、'.join(display_path(p) for p in state.get('roots', []))
+        text += '\n' + voice.ask_index('、'.join(display_path(p) for p in state.get('roots', [])))
     if state.get('status') == 'limited':
         text += '\n搜索达到限制或部分目录不可访问，候选可能不全。'
     return _reply(text, state)
@@ -364,4 +366,4 @@ def create_text(slots, on_step):
     if target.read_bytes() != slots['content'].encode('utf-8'):
         raise OSError('写入后内容核对不一致，不能确认成功。')
     on_step('已重新读取核对，内容一致', str(target))
-    return '已创建并逐字核对文本文件：`' + str(target) + '`\n内容：\n' + slots['content']
+    return voice.file_created(str(target), slots['content'], target.parent == desktop_folder())

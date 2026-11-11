@@ -598,3 +598,13 @@
 - 工具：Python 3 + unittest；真实 8775（默认数据目录，普通页面路径）；Edge headless + CDP；Git。无新依赖。
 - 一句话总结：现在“5秒后提醒我喝水”会建“喝水”而不是接着上一句；到点后最多十几秒就自动进“已完成”；就算你开着的是重启前的旧页面，服务端也会替你归档，刷新一次就换成新界面。
 - 验证与状态：`test_reminders` 18 项全过；全量 `discover` 192 项 = 3 failures + 2 errors + 1 skipped，与基线 3F+2E+1S 同源（live_news 1、chat_web 2、hermes_web 1、reply_limits 1），无新增失败。真实路径复测（默认数据目录、正常打开页面）：第一句“提醒我做我要做的什么”→只问几点、未建事项；第二句“5秒后提醒我喝水”→建“喝水”17:42:38，5 秒内进已完成（`fired_at` 17:42:39，`missed=0`），面板“已完成 (1) 喝水 已提醒 · 2026/11/11 17:42:38”，弹窗“时间到：喝水”；另用不带前端 fire 的轮询验证：到点 +12 秒 `done=1`、`fired_at==due`、`missed=0`。截图 `.preview/reminder-fix.png`。测试账号已删；桌面未新建文件；未推 GitHub、未上线。
+
+## [2026-11-11] 口吻定版：小白回到“暧昧期恋人”，所有模板回复统一过口吻层
+- 改了：新增 `training/VOICE.md`（用户定版、锁定 v1）和 `training/voice.py`（唯一模板出口，纯函数）。规格写清语气锚点（暧昧期恋人、短句口语、最多一处撒娇）、称呼规则（每条自然用一次账户称呼）、常用表达、禁区（客服腔/公文腔/说明书腔、靠语气词掩盖缺失、假承诺），以及“必须保留的信息”表（提醒条件、事实条数与类别、文件路径与内容、候选范围、失败原因、能力前提）；文件头写明“经用户 2026-11-11 拍板定版，后续不许擅自修改，要改须用户拍板并记日志”。
+- 改了：`training/reminders.py`、`training/local_web_tasks.py`、`training/file_write.py`、`training/hermes_memory.py`、`training/file_chat.py`、`training/chat_web.py` 的用户可见文案全部改走 `voice.py`；`personal_reply` 新增 `address` 参数，事实查询改成“BOOS，你的姓名是…；学校是…”，不再两条各喊一次；桌面外建文件不再说“已经在桌面创建”；读取失败走 `voice.missing_path()`。
+- 改了：`training/chat_local.py:75` 的 `VOICE_RULE` 拼进系统提示词（`SYSTEM_PROMPT`，`WEB_PROMPT` 自动继承），并加 `voice.tidy()` 兜底：把模型输出里的 `～` 换成停顿、去掉装饰符号（不碰信息）。`training/pi/bridge.mjs` 的文件工具提示词也追加同一约束。
+- 因为：用户拍板——小白口吻被代码里的硬模板冲成了客服腔/公文腔，必须恢复并锁定为他原先设定的“暧昧期恋人”亲近口吻；功能回复（事实存取、提醒建成、失败告知）是重灾区。硬规矩是信息完整性优先：条件、原因、路径、内容一个都不能少，只换说法，不许假承诺。
+- 我能改：`training/VOICE.md` 改语气与禁区（改完要记日志）；`training/voice.py` 里各返回函数的句子（函数名就是场景，如 `created_once`、`fact_saved`、`task_failed`）；`training/chat_local.py:75` 的模型约束句；`voice.tidy()` 的符号过滤。改完跑 `cd training && python -m unittest test_voice test_reminders test_personal_write test_local_web_tasks test_file_write`。
+- 工具：Python 3 + unittest；本机 Ollama `qwen3:8b`；临时隔离数据目录 `.preview/voice-data` 起真实 8775；urllib 验收脚本 `.preview/accept_voice.py`（`/api/session` 必须 GET，`/api/chat` 必须带 `chat_id`，否则 400）；Git。无新依赖。
+- 一句话总结：小白的话现在统一从 `voice.py` 出，模板回复不再像客服；闲聊由模型生成、受 `VOICE.md` 约束，波浪号拖音会被过滤；条件、原因、路径、内容仍然一条不少，做不到的事也不再顺口答应。
+- 验证与状态：新增 `training/test_voice.py` 8 项（规格锁版声明、七类模板信息完整、禁词不出现）全过；全量 `discover` 200 项 = 3 failures + 2 errors + 1 skipped，与基线 3F+2E+1S 同源，零断言删改（仅 `training/test_task_consistency.py:73` 按定版文案把“我没找到这个文件或文件夹”更新为“这个路径我没找到”，信息要素不变）。真实 8775 七样例（隔离数据目录、账户称呼 BOOS）：闲聊“BOOS，我在呢，今天累了吗？要不要先休息一下，还是想说说话？我在这儿陪着你哦。”；事实存入带两条类别与“现在共 2 条”；事实查询“你的姓名是穆柏润；学校是大连东软信息学院”；每日提醒带“网页开着、别静音、桌面通知、弹窗响一声、不进已完成”；建文件带完整路径与内容并说明逐字核对；读取失败“这个路径我没找到。你把完整路径再发我一次，我照着找。”；缺文件名只问文件名；能力问句带全部前提。测试服务已停，8775 已用默认数据目录重启（qwen3:8b，自动引擎）；未推 GitHub、未上线。

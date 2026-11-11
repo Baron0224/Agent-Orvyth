@@ -5,6 +5,7 @@ from file_lookup import find_matches, query_name
 from file_write import write_request
 from word_write import word_request
 from project_lookup import locate_project
+import voice
 
 ASK_PATH = '我在本机常用文档和项目目录里暂时没定位到对应文件。告诉我更具体的文件名，或者把文件所在文件夹发给我，我再接着找。'
 PROJECT_LOCATION = '这是你自己的项目资料，对吗？先告诉我它在本地文件夹还是网站里，再给我对应路径或链接，我就按那个范围找，不把项目名当影视作品去猜。'
@@ -116,10 +117,10 @@ def file_request(question, history, context=None):
         elif target.is_dir():
             folder, only_file = target, None
         else:
-            return {'reply': '这个路径不是普通文件或文件夹，请重新确认。',
+            return {'reply': '这个路径不是普通的文件或文件夹，你再确认一下。',
                     'task_state': 'failed', 'task_reason': '这个路径不是普通文件或文件夹。'}
     except (OSError, ValueError):
-        return {'reply': '我没找到这个文件或文件夹。请检查路径，再把完整路径发给我。',
+        return {'reply': voice.missing_path(),
                 'task_state': 'failed', 'task_reason': '没有找到要读取的文件或文件夹。'}
     task = f'用户要求：{original}\n本轮补充：{original_question}\n已定位来源：{target}\n'
     task += f'请先调用 read_project 读取 {only_file!r}，再根据实际内容回答。' if only_file else '请先调用 list_project 查看目录，再按要求读取相关文本。'

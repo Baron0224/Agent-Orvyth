@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 from datetime import datetime
 import hashlib,json,re,uuid
+import voice
 from pathlib import Path
 from hermes_memory_vendor.store import MemoryStore, _scan_memory_content
 from hermes_memory_vendor.compat import memory_root
@@ -139,15 +140,15 @@ class HermesMemory:
   return None
  def personal_answer(self,owner,question,address=''):
   declaration=re.fullmatch(r'我叫([^，。？！?\n]{1,24})[。！!]? ',question.strip()+' ')
-  if declaration and not re.search(r'什么|啥|吗|名字|姓名',declaration[1]):return '这轮我会按你说的名字称呼你：'+declaration[1]+'。这还没有保存到长期档案；需要长期保存时请明确说“记住：……”。'
+  if declaration and not re.search(r'什么|啥|吗|名字|姓名',declaration[1]):return voice.declaration_name(declaration[1])
   topic=self.fact_topic(question)
   if topic:
    try:items=self.entries(owner)
-   except (OSError,ValueError):return '当前账户档案暂时无法读取，这次不能确认个人信息。'
+   except (OSError,ValueError):return voice.fact_unreadable(False)
    patterns={'name':r'我叫|姓名|名字','school':r'学校|学院|大学|就读','birth':r'生日|出生|(?:19|20)\d{2}[.年/-]\d{1,2}'}
    records=[i['content'] for i in items if re.search(patterns[topic],i['content'])]
    suffix=(' 当前设置的称呼是'+address+'，它与真实姓名是两回事。') if topic=='name' and address else ''
-   if not records:return '当前账户档案中没有找到能确认这项个人信息的记录；这不代表之前本机展示失败。'+suffix
+   if not records:return voice.no_records()+suffix
    if topic=='birth' and not any(re.search(r'生日|出生',text) for text in records):
     return '档案里有相关原记录：\n'+'\n'.join(records[:6])+'\n其中日期没有标明用途，不能直接认作生日。这个日期是生日还是其他日期？'
    if topic=='name':
@@ -155,11 +156,11 @@ class HermesMemory:
     for text in records:
      match=re.search(r'(?:我叫|我的名字是|(?:真实)?姓名[：:是])([^，。；;\n]+)',text)
      if match and not re.search(r'学院|大学|学校|学生|年级|大[一二三四]|\d',match[1]):names.append(match[1].strip())
-    if names and len(set(names))==1:return '档案中明确记录的姓名是'+names[0]+'。来源原文：'+records[0]+suffix
+    if names and len(set(names))==1:return '档案里写着，你的姓名是'+names[0]+'。原话：'+records[0]+suffix
    if topic=='birth' and re.search(r'年份|哪年|几几年|出生年',question):
     years={m[1] for text in records for m in re.finditer(r'(?:生日|出生日期|出生)(?:是|为|于|[：:])?\s*((?:19|20)\d{2})(?:年|[./-])',text)}
     if len(years)==1:return '按档案中明确标注的生日／出生日期，出生年份是'+next(iter(years))+'年。'
-   return '档案里记着：\n'+'\n'.join(records[:6])+'\n以上是保存的原记录；组合内容不能可靠拆成独立字段时，我不擅自补全。'+suffix
+   return '档案里的原话是这样的：\n'+'\n'.join(records[:6])+'\n几件事混在一句里、拆不干净时，我不擅自补全。'+suffix
   if not re.search(r'你.{0,4}记得|还记得|我的.{0,12}(是什么|是什么来着|吗[？?]?$)',question):return None
   terms=self.terms(question);items=[]
   if re.search(r'名字|姓名',question):terms.update(('我叫','我的名字','我的姓名','姓名是'))
@@ -169,21 +170,21 @@ class HermesMemory:
    try:self.validate(i['content'],i['category'])
    except ValueError:continue
    if any(t in i['content'].lower() for t in terms) or (preference and i['category']=='preference'):items.append(i)
-  return '档案里记着：\n'+'\n'.join(i['content'] for i in items) if items else '档案里还没有记录这项，我先不猜。你愿意保存时，可以明确说“记住：……”；称呼仍以设置为准。'
+  return '档案里记着：\n'+'\n'.join(i['content'] for i in items) if items else '档案里还没有这条，我先不猜。愿意存的话，明确说“记住：……”就行；称呼仍按设置来。'
  def command(self,owner,question):
   listing,clearing,add,remove=self.commands(question)
   edit=re.fullmatch(r'(?:修改|更新|纠正)记忆第?(\d+)条?[：:]\s*(.+)',question,re.S)
   if not any((listing,clearing,add,remove,edit)):return None
   try:
    items=self.entries(owner)
-   if listing:return '目前还没有长期记忆。需要保存时，请明确说“记住：……” 。' if not items else '我记住了这些（仅保存在这台电脑）：\n'+'\n'.join(f'{n+1}. [{CATEGORIES[i["category"]]}] {i["content"]}' for n,i in enumerate(items))+'\n可说“修改记忆第1条：新内容”或“忘记第1条”。删除档案不等于删除聊天历史。'
-   if clearing:self.mutate(owner,'clear',confirmed=True);return '已清空长期记忆。聊天历史仍然保留；新建聊天后不会再注入这些档案。'
+   if listing:return voice.entry_empty() if not items else voice.listing(['['+CATEGORIES[i['category']]+'] '+i['content'] for i in items])+' 删除档案不等于删除聊天历史。'
+   if clearing:self.mutate(owner,'clear',confirmed=True);return voice.entry_cleared()+' 聊天历史还在；新建聊天不会再带上这些档案。'
    if add:
-    content=add[1].strip().strip('：:，,');self.mutate(owner,'add',content=content,category=self.category(content),source='explicit_chat');return '记住了：'+content+'\n以后新建聊天会按相关性参考。可在设置的记忆管理里改类别、编辑或删除。'
+    content=add[1].strip().strip('：:，,');self.mutate(owner,'add',content=content,category=self.category(content),source='explicit_chat');return voice.remembered(content)
    if edit:
     index=int(edit[1])-1
     if not 0<=index<len(items):raise ValueError('没有这一条记忆。')
-    content=edit[2].strip();self.mutate(owner,'edit',items[index]['id'],content, self.category(content));return '已更新这条记忆，旧内容已替换。新建聊天会使用新版；旧聊天原消息仍保留。'
+    content=edit[2].strip();self.mutate(owner,'edit',items[index]['id'],content, self.category(content));return voice.entry_updated()+' 新建聊天用新版，旧聊天的原消息还在。'
    if remove[1]:
     index=int(remove[1])-1
     if not 0<=index<len(items):raise ValueError('没有这一条记忆。')
@@ -192,5 +193,5 @@ class HermesMemory:
     matches=[i for i in items if remove[2].strip()==i['content']]
     if len(matches)!=1:raise ValueError('请先查看记忆，按序号明确要删除哪条。')
     entry=matches[0]
-   self.mutate(owner,'delete',entry['id']);return '已删除这条长期记忆。聊天历史原消息仍保留；新建聊天后不再注入。'
+   self.mutate(owner,'delete',entry['id']);return voice.entry_deleted()+' 聊天历史还在；新建聊天不会再带上它。'
   except ValueError as error:return str(error)

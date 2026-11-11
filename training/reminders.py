@@ -1,5 +1,7 @@
 """Small, conservative conversational reminder setup; no model-generated actions."""
 import re
+
+import voice
 from datetime import datetime, timedelta
 
 
@@ -65,16 +67,14 @@ RECORD = re.compile(r'帮我记[一下录]?|记录一下|记录|记一下|记下
 # “你会提醒我吗”“你能提醒我吗”这类问能力的句子只回答，不建事项。
 CAPABILITY = re.compile(r'(?:你|这个页面|它).{0,6}(?:会|能|可以|可不可以|能不能).{0,4}提醒我|(?:会|能)提醒我吗|能提醒我吗')
 
-CONDITION = '提醒只在这台电脑的网页开着时生效，浏览器和系统别静音；开启桌面通知后，到点会弹窗并响一声提示音。'
+CONDITION = voice.condition()
 
 
 def capability_answer(text):
     """Answer capability questions truthfully; return None when the text is not one."""
     if not CAPABILITY.search(text.strip()):
         return None
-    return ('会，但有前提：提醒只在这台电脑的网页开着时生效，浏览器和系统都不能静音；'
-            '点“开启桌面通知”后，到点会弹电脑通知，页面里也会响一声短提示音。'
-            '网页关着不会响，错过的事项会标成“已错过”并归档。')
+    return voice.capability()
 
 
 def _title_of(text):
@@ -103,12 +103,12 @@ def process_reminder(text, draft, now):
     wants = bool(REMIND.search(text) or RECORD.search(text) or re.search(r'(?:帮我|我要|我想|我需要).{0,12}打卡', text))
     if relative is not None and (draft is not None or re.search(r'提醒我|(?:帮我|我要|我想|我需要).{0,12}打卡', text)):
         if relative == 0:
-            return '请输入 1 秒到 24 小时以内的时间，例如 2 分钟后。', draft, None
+            return voice.need_time(), draft, None
         if re.search(r'每天|每日|每隔|连续', text):
-            return '“几分钟后”只能设置一次。若要每天提醒，请告诉我每天的具体时间。', draft, None
+            return voice.relative_once(), draft, None
     if re.search(r'每隔|隔[一二两三四五六七八九十0-9]+天|[一二两三四五六七八九十0-9]+天后', text):
         if draft is not None or re.search(r'提醒我|(?:帮我|我要|我想|我需要).{0,12}打卡', text):
-            return '我现在只能设置一天或连续每天的提醒。请告诉我今天还是明天开始、几点，以及持续一天、几天或每天。', draft, None
+            return voice.interval_unsupported(), draft, None
     if draft is None:
         if not wants:
             return None
@@ -125,11 +125,11 @@ def process_reminder(text, draft, now):
     else:
         draft = dict(draft)
         if re.fullmatch(r'取消|算了|不设置了|不用了', text):
-            return '好的，这次提醒不设置了。', None, None
+            return voice.cancelled(), None, None
         if not draft.get('title') and not read_time(text) and read_duration(text) is None and relative is None:
             draft['title'] = text[:160]
     if relative and draft.get('days') not in (None, 1):
-        return '你之前选择了连续提醒；“几分钟后”只能设置一次。请说每天的具体时间，或发送取消重新设置。', draft, None
+        return voice.series_relative_conflict(), draft, None
     if relative:
         target = datetime.fromtimestamp(now.timestamp() + relative, now.tzinfo)
         draft['due_at'] = target.timestamp()
@@ -145,20 +145,18 @@ def process_reminder(text, draft, now):
     elif not relative and '今天' in text:
         draft['start'] = now.date().isoformat()
     if not draft.get('title'):
-        return '想让我提醒你做什么？', draft, None
+        return voice.ask_title(), draft, None
     if not draft.get('time'):
-        return f'好，我记下“{draft["title"]}”。你想几点提醒？比如 13:00。', draft, None
+        return voice.ask_time(draft['title']), draft, None
     if draft.get('days') is None:
-        return '要提醒一天、连续几天，还是每天一直提醒？', draft, None
+        return voice.ask_days(), draft, None
     start = draft.get('start') or now.date().isoformat()
     end = (now.date().fromisoformat(start) + timedelta(days=draft['days'] - 1)).isoformat() if draft['days'] else None
     task = {'title': draft['title'], 'time': draft['time'], 'start': start, 'end': end, 'due_at': draft.get('due_at')}
     duration = '每天' if not draft['days'] else ('一次' if draft['days'] == 1 else f'连续{draft["days"]}天')
     if task['due_at']:
         target = datetime.fromtimestamp(task['due_at'], now.tzinfo)
-        reply = f'记好了：{target:%Y-%m-%d %H:%M:%S} 提醒你“{draft["title"]}”，只提醒一次。{CONDITION}'
+        reply = voice.created_once(f'{target:%Y-%m-%d %H:%M:%S}', draft['title'])
     else:
-        reply = f'记好了：从 {start} 开始，{duration} {draft["time"]} 提醒你“{draft["title"]}”，已放进右侧待办。{CONDITION}'
-    if not draft['days']:
-        reply += '每天触发后会顺延到次日同一时间，不会进“已完成”。'
+        reply = voice.created_series(start, duration, draft['time'], draft['title'], daily=not draft['days'])
     return reply, None, task

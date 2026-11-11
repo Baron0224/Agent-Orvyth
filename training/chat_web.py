@@ -20,6 +20,7 @@ from web_lookup import lookup, should_search, search_query, source_context, offi
 from pi_bridge import available as pi_available, run_project, validate_request
 from file_chat import file_request
 from file_write import create_text_file
+import voice
 from word_write import create_word_file
 from cloud_credentials import load_key
 from hermes_memory import HermesMemory
@@ -414,7 +415,7 @@ class Handler(BaseHTTPRequestHandler):
             if saved is not None:
                 self.stream_file_chat(owner, chat, question, {'reply': saved})
                 return
-            personal = local_web_tasks.personal_reply(self.server.memory, owner, question)
+            personal = local_web_tasks.personal_reply(self.server.memory, owner, question, profile.get('user_address', ''))
             if personal is not None:
                 self.stream_file_chat(owner, chat, question, {'reply': personal})
                 return
@@ -582,10 +583,12 @@ class Handler(BaseHTTPRequestHandler):
                 for content in text_stream:
                     delta = display.feed(content)
                     if delta:
+                        delta = voice.tidy(delta)
                         answer.append(delta)
                         emit({'type':'delta','content':delta})
                 tail = display.feed('', final=True)
                 if tail:
+                    tail = voice.tidy(tail)
                     answer.append(tail)
                     emit({'type':'delta','content':tail})
             stream = None
@@ -641,6 +644,7 @@ class Handler(BaseHTTPRequestHandler):
                     trace=TaskTrace(emit)
                     trace.finish('failed',plan.get('task_reason') or '要读取的内容没有取到，任务未完成。')
                 answer=self.server.memory.command(owner,plan['memory']) if 'memory' in plan else plan['reply']
+                answer=addressed(answer, self.server.store.state(owner)['profile'].get('user_address',''))
                 answer=self.server.store.save_pair(owner,chat,question,answer,search_evidence=plan.get('file_lookup'),engine=TOOL_ENGINE,**({'task_trace':trace.data} if trace else {}))
                 emit({'type':'delta','content':answer})
                 if plan.get('file_lookup'):
@@ -679,7 +683,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if trace:
                     trace.finish('failed',reason)
-                    answer='任务未完成：'+reason
+                    answer=voice.task_failed(reason)
                     evidence=plan.get('file_lookup')
                     if evidence and evidence.get('local_task'):
                         evidence['local_task']['phase']='failed'
