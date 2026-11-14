@@ -1,5 +1,8 @@
 """Completion state must follow the tool record, never the model's claim."""
 import tempfile
+import json
+import shutil
+import subprocess
 import unittest
 from functools import partial
 from pathlib import Path
@@ -8,6 +11,60 @@ from unittest.mock import patch
 from chat_web import ChatServer
 from task_trace import TaskTrace
 import test_chat_web
+
+
+@unittest.skipUnless(shutil.which('node'), '需要 Node.js')
+class PiBridgeFinalTests(unittest.TestCase):
+    def run_bridge(self, content, first, second):
+        bridge = Path(__file__).with_name('pi') / 'bridge.mjs'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / 'orvyth测试.txt'
+            target.write_text(content, encoding='utf8')
+            source = bridge.read_text(encoding='utf8')
+            for name in ('project-path.mjs', 'docx-tools.mjs'):
+                source = source.replace(f"'./{name}'", repr((bridge.parent / name).as_uri()))
+            source = source.replace('import.meta.url', json.dumps(bridge.as_uri()))
+            source = source.replace("'@earendil-works/pi-coding-agent'", "'./sdk.mjs'")
+            script = root / 'bridge.mjs'
+            script.write_text(source, encoding='utf8')
+            (root / 'sdk.mjs').write_text(f"""
+export const createExtensionRuntime = () => null;
+export const ModelRuntime = {{create: async () => ({{getModel() {{}}}})}};
+export const SessionManager = {{inMemory() {{}}}};
+export const SettingsManager = SessionManager;
+export const loadSkillsFromDir = () => [];
+export async function createAgentSession({{customTools}}) {{
+ let calls = 0;
+ return {{session: {{
+  messages: [], subscribe() {{}}, dispose() {{}},
+  async prompt(prompt) {{
+   if (++calls === 1) {{
+    const reader = customTools.find(tool => tool.name === 'read_project');
+    await reader.execute('read', {{path: {json.dumps(target.name)}}});
+   }} else {{
+    if (calls !== 2 || !prompt.includes({json.dumps(content)})) throw new Error('未按原文追问一次');
+   }}
+   this.messages.push({{role:'assistant',stopReason:'stop',content:[{{type:'text',
+    text: calls === 1 ? {json.dumps(first)} : {json.dumps(second)}}}]}});
+  }}
+ }}}};
+}}
+""", encoding='utf8')
+            question = f'读取 "{target}"，只告诉我这份文本写了什么'
+            request = dict(folder=directory, task=f'用户要求：{question}', model='qwen3:8b',
+                           onlyFile=target.name, verifyFinal=True)
+            result = subprocess.run(['node', str(script)], input=json.dumps(request).encode(),
+                                    capture_output=True, timeout=20)
+            return [json.loads(line) for line in result.stdout.decode('utf8').splitlines()]
+
+    def test_short_text_retry_contains_actual_tool_content(self):
+        events = self.run_bridge('核心路径实测', '无法读取', '核心路径实测')
+        self.assertEqual(events[-1], {'type': 'done', 'content': '核心路径实测'})
+
+    def test_long_text_keeps_model_answer(self):
+        events = self.run_bridge('长' * 121, '模型总结', '')
+        self.assertEqual(events[-1], {'type': 'done', 'content': '模型总结'})
 
 
 class TaskTraceTests(unittest.TestCase):
@@ -102,6 +159,36 @@ class StreamConsistencyTests(unittest.TestCase):
             events = self.send(f'读取"{self.file}"')
         self.assertEqual(self.last_task(events)['state'], 'completed')
         self.assertEqual(self.web.state()['messages'][-1]['task_trace']['state'], 'completed')
+
+    def test_local_final_result_controls_saved_answer_and_task_state(self):
+        self.web.server.verify_pi_final = True
+        read = {'type': 'tool', 'name': 'read_project', 'path': self.file.name}
+        old_delta = {'type': 'delta', 'content': '我无法读取这个文件。'}
+        for events, expected_state, expected_text in (
+            ([read, {'type': 'done', 'content': '文件路径或文件名可能存在错误。'}],
+             'failed', '工具已成功读取文件，但最终回答没有用上读取结果'),
+            ([read, {'type': 'done', 'content': '我没读到这个文件。'}],
+             'failed', '工具已成功读取文件，但最终回答没有用上读取结果'),
+            ([read, old_delta, {'type': 'done', 'content': '文件里写的是核心路径实测。'}],
+             'completed', '文件里写的是核心路径实测。'),
+            ([old_delta, {'type': 'error', 'message': '本次没有成功读取文件'}],
+             'failed', '本次没有成功读取文件'),
+        ):
+            with self.subTest(state=expected_state, events=events):
+                with patch('chat_web.run_project', return_value=(event for event in events)) as run:
+                    response = self.send(f'读取"{self.file}"')
+                self.assertTrue(run.call_args.kwargs['verify_final'])
+                text = ''.join(event.get('content', '') for event in response)
+                self.assertIn(expected_text, text)
+                self.assertNotIn(old_delta['content'], text)
+                self.assertEqual(self.last_task(response)['state'], expected_state)
+                saved = self.web.state()['messages'][-1]
+                self.assertEqual(saved['content'], text)
+                self.assertEqual(saved['task_trace']['state'], expected_state)
+                if expected_state == 'failed':
+                    self.assertNotIn('核心路径实测', text)
+                    self.assertTrue(all(event['task']['state'] != 'completed'
+                                        for event in response if event['type'] == 'task'))
 
 
 if __name__ == '__main__':

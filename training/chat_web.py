@@ -97,6 +97,7 @@ class ChatServer(ThreadingHTTPServer):
         self.locks_guard = threading.Lock()
         super().__init__(("127.0.0.1", port), Handler)
         self.origin = f"http://127.0.0.1:{self.server_port}"
+        self.verify_pi_final = self.server_port == 8775
     def engine_of(self, owner):
         try:
             engine = self.store.profile(owner).get('chat_engine', 'auto')
@@ -630,6 +631,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         stream = None
         trace = None
+        verify_final = False
         try:
             self.headers_for(200, "application/x-ndjson; charset=utf-8")
             self.end_headers()
@@ -662,16 +664,27 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     trace.step('已定位来源',plan['folder'])
                     chunks=[];settled=False;tools=0
-                    stream=run_project(plan['folder'],plan['task'],self.server.tool_model,only_file=plan['only_file'])
+                    verify_final = self.server.verify_pi_final
+                    options = {'only_file': plan['only_file']}
+                    if verify_final:
+                        options['verify_final'] = True
+                    stream=run_project(plan['folder'],plan['task'],self.server.tool_model,**options)
+                    final_answer = ''
                     for event in stream:
                         if event['type']=='error':raise RuntimeError(event['message'])
-                        if event['type']=='done':settled=True;break
+                        if event['type']=='done':
+                            settled=True
+                            if verify_final:
+                                final_answer = event.get('content', '')
+                            break
                         if event['type']=='delta':chunks.append(event['content'])
                         if event['type']=='tool':
                             trace.tool(event,plan['folder']);tools+=1
-                    if not settled or not tools or not ''.join(chunks).strip():
+                    if not verify_final:
+                        final_answer = ''.join(chunks)
+                    if not settled or not tools or not isinstance(final_answer, str) or not final_answer.strip():
                         raise RuntimeError('没有获得完整的工具执行结果，任务未确认完成。')
-                    answer=trace.reconcile(''.join(chunks),plan.get('only_file'))
+                    answer=trace.reconcile(final_answer,plan.get('only_file'),verify_final=verify_final)
                     trace.step('工具执行已结束，回答依据已读取的资料生成')
                 trace.finish('completed','执行检查通过')
                 answer=self.server.store.save_pair(owner,chat,question,answer,task_trace=trace.data,search_evidence=plan.get('file_lookup'),engine=TOOL_ENGINE)
@@ -683,7 +696,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if trace:
                     trace.finish('failed',reason)
-                    answer=voice.task_failed(reason)
+                    answer=f'这次任务未完成——{reason}' if verify_final else voice.task_failed(reason)
                     evidence=plan.get('file_lookup')
                     if evidence and evidence.get('local_task'):
                         evidence['local_task']['phase']='failed'

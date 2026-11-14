@@ -4,6 +4,7 @@ from pathlib import Path
 
 FAILURE_CLAIMS = re.compile(r'无法读取|读不到|打不开|读取失败|没有权限|无权限|无法访问|访问不了|没找到这个文件|文件不存在')
 READ_CLAIMS = re.compile(r'已读取|读到了|读取成功|我已经读|读完了')
+LOCAL_PI_FAILURE_CLAIMS = re.compile(r'无法读取|读不到|没读到|无法访问|打不开|文件路径或文件名可能存在错误')
 MAX_EVIDENCE = 12000
 
 
@@ -44,13 +45,19 @@ class TaskTrace:
     def reads(self):
         return [item for item in self.data['tools'] if item['name'] == 'read_project']
 
-    def reconcile(self, answer, only_file=None):
+    def reconcile(self, answer, only_file=None, *, verify_final=False):
         """Refuse to call a task complete when the reply contradicts the tool record."""
         reads = self.reads()
         if only_file and not reads:
             raise RuntimeError(f'任务要求读取「{only_file}」，但工具记录里没有成功读取它的记录，不能确认任务完成。')
         if not reads and READ_CLAIMS.search(answer):
             raise RuntimeError('最终回答称已经读取文件，但工具记录里没有读取成功的记录，不能确认任务完成。')
+        if verify_final:
+            if self.data['tools'] and LOCAL_PI_FAILURE_CLAIMS.search(answer):
+                if reads:
+                    raise RuntimeError('工具已成功读取文件，但最终回答没有用上读取结果，任务未完成。')
+                raise RuntimeError('工具没有成功读取文件，任务未完成。')
+            return answer
         if reads and FAILURE_CLAIMS.search(answer):
             target = Path(reads[0]['path'])
             try:
