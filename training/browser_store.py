@@ -24,7 +24,7 @@ class MissingRecord(ValueError):
 
 
 class Store:
-    def __init__(self, path):
+    def __init__(self, path, *, cloud_history=False):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
@@ -52,6 +52,8 @@ class Store:
                 db.execute('ALTER TABLE messages ADD COLUMN task_trace TEXT')
             if 'engine' not in {row['name'] for row in db.execute('PRAGMA table_info(messages)')}:
                 db.execute('ALTER TABLE messages ADD COLUMN engine TEXT')
+            if cloud_history and 'cloud_text' not in {row['name'] for row in db.execute('PRAGMA table_info(messages)')}:
+                db.execute('ALTER TABLE messages ADD COLUMN cloud_text TEXT')
             for name, kind in (("remind_time", "TEXT"), ("start_date", "TEXT"), ("end_date", "TEXT"), ("last_done_date", "TEXT"), ("due_at", "REAL"), ("fired_at", "REAL"), ("missed", "INTEGER"), ("last_fire_date", "TEXT")):
                 if name not in columns:
                     db.execute(f"ALTER TABLE tasks ADD COLUMN {name} {kind}")
@@ -159,6 +161,15 @@ class Store:
             rows = db.execute("SELECT role,content,search_evidence FROM messages WHERE chat=? ORDER BY id DESC LIMIT 16", (chat,)).fetchall()
             return [{'role':row['role'],'content':'[本机档案展示成功；全文不发给模型，个人事实应另从当前账户档案检索。]' if row['search_evidence'] and json.loads(row['search_evidence']).get('local_only') else row['content']} for row in reversed(rows)]
 
+    def cloud_history(self, owner, chat):
+        with self.connect() as db:
+            self.require_chat(db, owner, chat)
+            rows = db.execute(
+                "SELECT role, cloud_text FROM messages WHERE chat=? AND cloud_text IS NOT NULL ORDER BY id DESC LIMIT 10",
+                (chat,),
+            ).fetchall()
+            return [{'role': row['role'], 'content': row['cloud_text']} for row in reversed(rows)]
+
     def latest_search_evidence(self, owner, chat):
         """Only the immediately preceding assistant reply, in this owner's chat."""
         with self.connect() as db:
@@ -207,13 +218,17 @@ class Store:
             else:
                 raise ValueError("未知聊天操作。")
 
-    def save_pair(self, owner, chat, question, answer, task_trace=None, search_evidence=None, usage=None, engine=None):
+    def save_pair(self, owner, chat, question, answer, task_trace=None, search_evidence=None, usage=None, engine=None, *, cloud_answer=None):
         with self.connect() as db:
             row = self.require_chat(db, owner, chat)
             address = json.loads(db.execute("SELECT profile FROM owners WHERE id=?", (owner,)).fetchone()["profile"]).get("user_address", "")
             answer = ((address + "，" if address else "") + answer) if search_evidence and search_evidence.get("local_only") else addressed(answer, address)
-            db.executemany("INSERT INTO messages(chat,role,content) VALUES (?,?,?)", [
-                (chat, "user", question), (chat, "assistant", answer)])
+            if cloud_answer is not None and search_evidence is None and task_trace is None:
+                db.executemany("INSERT INTO messages(chat,role,content,cloud_text) VALUES (?,?,?,?)", [
+                    (chat, "user", question, question), (chat, "assistant", answer, cloud_answer)])
+            else:
+                db.executemany("INSERT INTO messages(chat,role,content) VALUES (?,?,?)", [
+                    (chat, "user", question), (chat, "assistant", answer)])
             if usage:
                 db.execute('UPDATE messages SET usage=? WHERE id=last_insert_rowid()', (json.dumps(usage),))
             if engine:

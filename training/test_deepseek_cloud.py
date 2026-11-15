@@ -144,4 +144,29 @@ class CloudTests(unittest.TestCase):
                 server.shutdown();server.server_close();thread.join();local.server_close()
 
 
+class CloudHistoryTests(unittest.TestCase):
+    def test_only_verified_pairs_in_active_chat_are_kept(self):
+        from browser_store import Store
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / 'browser.sqlite3', cloud_history=True)
+            _, owner = store.owner(create=True)
+            other_chat = store.state(owner)['active_chat']
+            store.save_pair(owner, other_chat, 'other question', 'other reply', cloud_answer='OTHER_CHAT')
+            store.chat_action(owner, 'new')
+            chat = store.state(owner)['active_chat']
+            store.save_pair(owner, chat, 'old question', 'OLD_UNMARKED')
+            for number in range(6):
+                store.save_pair(owner, chat, f'question {number}', 'display with account address',
+                                cloud_answer=f'raw reply {number}')
+            store.save_pair(owner, chat, 'read a file', 'FILE_ONLY', task_trace={'state': 'done'})
+            store.save_pair(owner, chat, 'read profile', 'PROFILE_ONLY')
+            store.save_pair(owner, chat, 'search this', 'SEARCH_ONLY',
+                            search_evidence={'kind': 'web'}, cloud_answer='unexpected tool text')
+            history = store.cloud_history(owner, chat)
+            self.assertEqual([message['role'] for message in history], ['user', 'assistant'] * 5)
+            self.assertEqual([message['content'] for message in history], [
+                text for number in range(1, 6) for text in (f'question {number}', f'raw reply {number}')
+            ])
+
+
 if __name__=='__main__':unittest.main()

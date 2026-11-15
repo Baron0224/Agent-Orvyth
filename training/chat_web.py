@@ -96,7 +96,7 @@ class ChatServer(ThreadingHTTPServer):
             default_path = base / 'Orvyth' / 'cloud' / 'browser.sqlite3'
         elif db_path is None:
             default_path = default_database_path()
-        self.store = Store(db_path or default_path)
+        self.store = Store(db_path or default_path, cloud_history=port == 8775 and not is_cloud(model))
         self.memory = HermesMemory(self.store.path.parent / 'hermes-memory')
         self.model = model
         self.tool_model = tool_model or ('qwen3:8b' if model.startswith('deepseek-r1') or is_cloud(model) else model)
@@ -510,7 +510,9 @@ class Handler(BaseHTTPRequestHandler):
             if saved is not None:
                 self.stream_file_chat(owner, chat, question, {'reply': saved})
                 return
-            personal = local_web_tasks.personal_reply(self.server.memory, owner, question, profile.get('user_address', ''))
+            personal = role_info(question, profile.get('pet_name') or '小白', profile.get('user_address', ''), account_facts_first=True)
+            if personal is None:
+                personal = local_web_tasks.personal_reply(self.server.memory, owner, question, profile.get('user_address', ''))
             if personal is not None:
                 self.stream_file_chat(owner, chat, question, {'reply': personal})
                 return
@@ -522,8 +524,12 @@ class Handler(BaseHTTPRequestHandler):
         if memory_file:
             self.stream_file_chat(owner,chat,question,memory_file)
             return
-        direct = self.server.memory.personal_answer(owner,question,profile.get('user_address','')) if self.server.server_port != 8775 and not self.server.memory.is_command(question) else None
-        direct = direct or role_info(question,profile.get('pet_name') or '小白',profile.get('user_address',''))
+        pet_name = profile.get('pet_name') or '小白'
+        address = profile.get('user_address', '')
+        # The standalone cloud entry keeps its existing saved-fact lookup for user-only questions.
+        direct = role_info(question, pet_name, address, account_facts_first=self.server.provider == 'deepseek')
+        if direct is None and self.server.server_port != 8775 and not self.server.memory.is_command(question):
+            direct = self.server.memory.personal_answer(owner, question, address) or role_info(question, pet_name, address)
         if re.fullmatch(r'[？?\s]+',question):
             direct='你想让我解释上一条的哪一点？我先不继续查找文件。'
         if direct:
@@ -622,6 +628,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write((json.dumps(data, ensure_ascii=False) + "\n").encode("utf-8"))
                 self.wfile.flush()
             local = LocalChat(selected_model, system_prompt=WEB_PROMPT.replace(WEB_PRIVACY, self.server.privacy) + preference_prompt(profile), privacy_notice=self.server.privacy)
+            local.cloud_request_only = self.server.server_port == 8775
             local.memory_context = self.server.memory.prompt(owner,question)
             pet_name = self.server.store.state(owner)['profile'].get('pet_name') or '小白'
             local.display_name = pet_name
@@ -663,6 +670,8 @@ class Handler(BaseHTTPRequestHandler):
                 local.system_prompt += '\n用户禁止联网，本轮没有搜索；不要声称查过，实时信息只能说明未核实。'
             if selected_model.startswith("deepseek-r1"):
                 emit({"type":"status","message":"模型正在思考与生成，正文到达后会逐字显示。"})
+            if local.cloud_request_only and is_cloud(selected_model) and not searched:
+                local.cloud_history = self.server.store.cloud_history(owner, chat)
             actual = {'engine': selected_route['engine'], 'model': selected_model,
                       'reason': selected_route['reason'], 'auto': selected_route['auto']}
             def publish(engine, model, reason, auto):
@@ -705,7 +714,8 @@ class Handler(BaseHTTPRequestHandler):
                     drain(stream)
                 usage = {'provider': 'deepseek', 'model': actual['model'].removeprefix('deepseek-cloud:'), **local.usage} if is_cloud(actual['model']) and local.usage else None
                 final = self.server.store.save_pair(owner, chat, question, "".join(answer), search_evidence=source, usage=usage,
-                                                    engine={k: actual[k] for k in ('engine', 'model', 'reason', 'auto')})
+                                                    engine={k: actual[k] for k in ('engine', 'model', 'reason', 'auto')},
+                                                    cloud_answer=local.cloud_answer if not searched else None)
                 if is_cloud(actual['model']): self.server.cloud_verified = True
                 emit({"type": "done", "chat_id": chat, **({"usage": usage} if usage else {})})
             except (RuntimeError, ValueError, sqlite3.Error) as error:
