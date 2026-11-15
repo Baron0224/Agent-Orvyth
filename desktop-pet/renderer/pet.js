@@ -267,9 +267,9 @@ function wireEvents() {
   });
 
   window.addEventListener('pointerdown', (event) => {
+    if (event.target.closest('.menu, .ask')) return;
     hideMenu();
     if (event.button !== 0) return;
-    if (event.target.closest('.menu, .ask')) return;
     dragState = { x: event.screenX, y: event.screenY, time: performance.now() };
     dragMoved = false;
     window.pet.setIgnore(false); // 拖动和点击时必须可交互

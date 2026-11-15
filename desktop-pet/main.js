@@ -2,7 +2,7 @@
 // Orvyth 桌面小柴 —— Electron 主进程
 // 透明无边框悬浮窗 + 复用仓库里的 3D 模型 + 可选的聊天（连本机 chat_web.py）
 
-const { app, BrowserWindow, ipcMain, protocol, screen, shell, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, screen, shell, globalShortcut, safeStorage, dialog } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const http = require('node:http');
@@ -88,34 +88,33 @@ function stopDrag() {
   dragTimer = null;
 }
 
-// ---------- 聊天：复用 chat_web.py 的 /api/session 与 /api/chat ----------
-const session = { cookie: null, chat: null };
-
-function cookieHeader() {
-  return session.cookie ? `orvyth_session=${session.cookie}` : '';
+// Windows DPAPI：凭证只由 Electron 主进程读取；网页和精灵渲染层拿不到。
+const credentialPath = () => path.join(app.getPath('userData'), `desktop-pair-${PORT}.bin`);
+let pendingPair = null;
+let pairingFlow = null;
+function openDailyPage(suffix = '/') {
+  return shell.openExternal((process.platform === 'win32' ? 'microsoft-edge:' : '') + BASE + suffix);
 }
 
-function rememberCookie(setCookie) {
-  const list = Array.isArray(setCookie) ? setCookie : (setCookie ? [setCookie] : []);
-  for (const raw of list) {
-    const m = /orvyth_session=([^;]+)/.exec(raw);
-    if (m) session.cookie = m[1];
-  }
-}
-
-function getSession() {
+function desktopRequest(action, payload, token) {
   return new Promise((resolve, reject) => {
+    const body = payload === undefined ? null : JSON.stringify(payload);
     const req = http.request({
-      host: '127.0.0.1', port: PORT, path: '/api/session', method: 'GET',
-      headers: { Host: `127.0.0.1:${PORT}`, Cookie: cookieHeader() }
+      host: '127.0.0.1', port: PORT, path: '/api/desktop/' + action, method: body ? 'POST' : 'GET',
+      headers: { Origin: BASE,
+        ...(body ? {'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body)} : {}),
+        ...(token ? {'X-Orvyth-Desktop': token} : {}) }
     }, (res) => {
       const chunks = [];
       res.on('data', (c) => chunks.push(c));
       res.on('end', () => {
-        rememberCookie(res.headers['set-cookie']);
-        if (res.statusCode !== 200) return reject(new Error(`会话接口 ${res.statusCode}`));
         try {
-          resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+          const value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+          if (res.statusCode !== 200) {
+            const error = new Error(value.error || '桌面配对暂时不可用。');
+            error.status = res.statusCode;
+            reject(error);
+          } else resolve(value);
         } catch (err) {
           reject(err);
         }
@@ -123,16 +122,53 @@ function getSession() {
     });
     req.setTimeout(5000, () => req.destroy(new Error('连接超时')));
     req.on('error', reject);
-    req.end();
+    req.end(body || undefined);
   });
 }
 
-async function ask(text) {
-  let state = await getSession();
-  session.chat = state && state.active_chat;
-  if (!session.chat) throw new Error('还没有可用的聊天，先打开一次网页版 Orvyth 再试。');
+async function getPairedSession() {
+  if (process.platform !== 'win32' || !safeStorage.isEncryptionAvailable()) {
+    throw new Error('当前系统无法安全保存桌面凭证。');
+  }
+  let token;
+  try {
+    token = safeStorage.decryptString(await fs.readFile(credentialPath()));
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw new Error('无法读取本机桌面凭证。');
+  }
+  if (!token) {
+    if (!pendingPair) {
+      pendingPair = await desktopRequest('start', {});
+      const response = await dialog.showMessageBox(win, {
+        type: 'info', title: '配对桌面精灵', message: '桌面精灵配对码：' + pendingPair.code,
+        detail: '五分钟内，在日常账户的网页输入此码并点击确认；确认后回到这里重新发送消息。',
+        buttons: ['打开 Edge 确认', '稍后确认'], cancelId: 1
+      });
+      if (response.response === 0) await openDailyPage('/?desktop=1');
+      throw new Error('请先在日常账户网页确认配对，再重新发送。');
+    }
+    let result;
+    try { result = await desktopRequest('claim', pendingPair); }
+    catch (error) { if (error.status === 400) pendingPair = null; throw error; }
+    if (result.waiting) throw new Error('还在等你在网页确认配对。');
+    pendingPair = null;
+    token = result.token;
+    await fs.writeFile(credentialPath(), safeStorage.encryptString(token), { flag: 'wx' });
+  }
+  try {
+    return { state: await desktopRequest('session', undefined, token), token };
+  } catch (error) {
+    if (error.status === 401) await fs.rm(credentialPath(), { force: true });
+    throw error;
+  }
+}
 
-  const body = JSON.stringify({ message: text, chat_id: session.chat });
+async function ask(text) {
+  if (!pairingFlow) pairingFlow = getPairedSession().finally(() => { pairingFlow = null; });
+  const {state, token} = await pairingFlow;
+  if (!state.active_chat) throw new Error('还没有可用的聊天，先打开一次网页版 Orvyth 再试。');
+
+  const body = JSON.stringify({ message: text, chat_id: state.active_chat });
   return new Promise((resolve, reject) => {
     let settled = false;
     let answer = '';
@@ -149,7 +185,7 @@ async function ask(text) {
         Origin: BASE,
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(body),
-        Cookie: cookieHeader()
+        'X-Orvyth-Desktop': token
       }
     }, (res) => {
       if (res.statusCode !== 200) {
@@ -184,7 +220,8 @@ async function ask(text) {
           }
         }
       });
-      res.on('end', () => finish(null));
+      res.on('aborted', () => finish(new Error('桌面聊天已断开，请检查配对状态。')));
+      res.on('end', () => finish(new Error('桌面聊天连接结束，未收到完整回复。')));
       res.on('error', finish);
     });
 
@@ -201,7 +238,7 @@ ipcMain.on('pet:drag-end', () => stopDrag());
 ipcMain.on('pet:ignore', (_event, ignore) => {
   if (win && !win.isDestroyed()) win.setIgnoreMouseEvents(!!ignore, { forward: true });
 });
-ipcMain.on('pet:open-chat', () => shell.openExternal(BASE + '/'));
+ipcMain.on('pet:open-chat', () => openDailyPage().catch(() => {}));
 ipcMain.on('pet:quit', () => app.quit());
 ipcMain.handle('pet:ask', async (_event, text) => {
   const message = String(text || '').trim();

@@ -426,6 +426,54 @@ $('#task-form').addEventListener('submit', async event => {
 $('#profile-button').addEventListener('click', () => { const menu = $('#profile-menu'); menu.hidden = !menu.hidden; $('#profile-button').setAttribute('aria-expanded',String(!menu.hidden)); });
 document.addEventListener('click', event => { if (!event.target.closest('.sidebar-bottom')) { $('#profile-menu').hidden = true; $('#profile-button').setAttribute('aria-expanded','false'); } });
 $('#settings').addEventListener('click', openSettings);
+const pairingDialog = $('#desktop-pairing-dialog');
+const pairingStatus = $('#desktop-pairing-status');
+function showPairedDevices(devices) {
+  const list = $('#desktop-pairing-devices');
+  list.replaceChildren();
+  for (const device of devices) {
+    const row = document.createElement('li');
+    const button = document.createElement('button');
+    row.append('桌面精灵 · ' + device.label + '… ');
+    button.type = 'button';
+    button.textContent = '撤销';
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        showPairedDevices((await requestJSON('/api/desktop/revoke', {id: device.id})).devices);
+        pairingStatus.textContent = '已撤销。桌面精灵需重新配对。';
+      } catch (error) { pairingStatus.textContent = error.message; button.disabled = false; }
+    });
+    row.append(button);
+    list.append(row);
+  }
+}
+async function openDesktopPairing() {
+  $('#profile-menu').hidden = true;
+  $('#desktop-pairing-devices').replaceChildren();
+  pairingStatus.textContent = '';
+  if (!pairingDialog.open) pairingDialog.showModal();
+  try {
+    showPairedDevices((await requestJSON('/api/desktop/list', {})).devices);
+  } catch (error) { pairingStatus.textContent = error.message; }
+}
+$('#open-desktop-pairing').addEventListener('click', openDesktopPairing);
+$('#desktop-pairing-close').addEventListener('click', () => pairingDialog.close());
+$('#desktop-pairing-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const field = $('#desktop-pairing-code');
+  const button = event.submitter;
+  button.disabled = true;
+  try {
+    await requestJSON('/api/desktop/approve', {code: field.value});
+    field.value = '';
+    pairingStatus.textContent = '已确认。回到桌面精灵，重新发送消息完成配对。';
+  } catch (error) { pairingStatus.textContent = error.message; }
+  finally { button.disabled = false; }
+});
+if (new URLSearchParams(location.search).get('desktop') === '1') {
+  window.addEventListener('load', openDesktopPairing, {once: true});
+}
 $('#settings-close').addEventListener('click', () => $('#settings-dialog').close());
 $('#settings-form').noValidate = true;
 $('#settings-form').addEventListener('submit', async event => {

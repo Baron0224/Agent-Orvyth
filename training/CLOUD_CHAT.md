@@ -1,16 +1,13 @@
 # Orvyth 云端聊天
 
-在本机 PowerShell 运行：
+日常云端聊天已并入 8775。在原来的 Edge 日常账户打开 http://127.0.0.1:8775/ ，进入「设置 → 聊天引擎」选择云端或自动。也可用旧启动命令打开正式入口：
 
 ```powershell
 & "D:\Codex\Orvyth\training\chat_cloud.cmd"
 ```
 
-密钥只在你自己的终端隐藏输入，不显示字符是正常现象。不要把密钥发到聊天、写入代码或上传GitHub。
-启动依次使用：`DEEPSEEK_API_KEY` 环境变量、本程序保存的加密密钥、终端隐藏输入。
-首次手动输入后，询问是否加密保存：输入 `y` 才保存，直接回车仅本次使用，输入 `c` 取消启动。
-选择保存后，同Windows账户下次启动免输。保存位置为 `%LOCALAPPDATA%/Orvyth/credentials/deepseek.dpapi`，在仓库外，用Windows DPAPI（系统提供的当前用户加密服务）保护，不是明文文件。同账户下的程序仍可能解密，不保证绝对安全。
-解密失败保留原文件并提示重新输入；保存失败提示后仍可仅本次使用。不自动保存空密钥，不回显密钥。
+8775 读取启动进程的 `DEEPSEEK_API_KEY` 环境变量或已经保存的加密密钥。检测不到可用密钥时，网页会提示「云端未配置」。不要把密钥发到聊天、写入代码或上传 GitHub。
+以前保存的密钥位于 `%LOCALAPPDATA%/Orvyth/credentials/deepseek.dpapi`，用 Windows DPAPI（系统提供的当前用户加密服务）保护。
 关闭终端结束服务。若要忘记保存的密钥，执行后输入 `y` 确认：
 
 ```powershell
@@ -20,9 +17,7 @@
 只删除本程序的固定密钥文件，不删除聊天资料或环境变量；正在运行的服务仍可能持有旧密钥，下次启动才生效。若环境变量仍设置，启动仍会优先使用它。
 Windows加密依据：[Microsoft CryptProtectData](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata)。
 
-云端地址为 http://127.0.0.1:8776 ，本地版仍是 http://127.0.0.1:8775 。
-云端版在本机应用数据目录的 `Orvyth/cloud/browser.sqlite3` 保存资料，Cookie也单独命名；原本地版数据库和记忆不复制、不删除。
-因此首次进入云端版需要重新设置称呼和精灵名。云端服务仍在你电脑运行，未部署到公网。
+旧 8776 不再是日常入口。它独立的 `Orvyth/cloud/browser.sqlite3`、档案和会话保留备查，不会自动迁进 8775。
 
 聊天使用 DeepSeek 官方 `deepseek-flash`，显式关闭思考模式，保留共用口吻、称呼和有限记忆。
 问题、选中历史、选中的长期档案和本轮网页摘要会发给DeepSeek；文件工具仍使用本机Pi与Qwen，需要本机Ollama。

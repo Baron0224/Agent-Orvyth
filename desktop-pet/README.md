@@ -41,7 +41,9 @@ set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
 - 端口默认 8775（`chat_web.py` 的默认值），可以用环境变量覆盖：`set ORVYTH_PORT=8800 && npm start`。
 - 需要先启动网页版：跑 `training\chat_web.cmd`，让 `chat_web.py` 在监听。
 - 桌宠会先 `GET /api/session` 拿到本机 owner 和 `active_chat`，再 `POST /api/chat`；
-  消息会写进**当前这段聊天**，网页里能看到同一条对话（这是故意的，保持同一个 Orvyth）。
+  第一次右键发消息时，精灵会显示八位配对码。在 Edge 的日常 Orvyth 账户确认后，回到精灵重新发送消息。
+  配对后消息会写进日常账户当前的聊天。凭证由 Windows 加密保存，精灵重启后会继续使用。
+  在网页头像菜单的「桌面精灵」里可撤销配对；撤销会断开该设备的聊天连接。
 - 8B 模型首字可能要几秒，气泡会先显示「……」。
 
 ## 目录

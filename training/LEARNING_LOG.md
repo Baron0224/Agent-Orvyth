@@ -627,3 +627,24 @@
 - 我能改：`training/pi/bridge.mjs:20` 的 shortTextLimit。仍为120字符，仍仅追问一次，工具上限12。
 - 工具：Python、Node、PowerShell和Computer Use。真实Edge日常账户答出已经保存的姓名学校。发送歧义正常澄清，简历返回3项，同名创建显示任务未完成，原文件哈希一致。
 - 验证与状态：34项相关回归通过，Node语法和diff检查通过。仅本地8775已重启，聊天和文件工具均为qwen3:8b。未提交、未推送。
+
+## [2026-11-15] 桌面精灵经网页确认后回到日常账户
+- 改了：`training/chat_web.py:47–54、223–410、816–822` 是网页服务和正式启动入口；仅浏览器会话 → 识别已批准的桌面凭证。 `training/desktop_pairing.py:14–99` 管理一次性码、凭证摘要和连接；新增日常账户确认、持久保存、撤销断开。 `desktop-pet/main.js:91–230` 是桌面聊天与 Windows 凭证保存；独立领浏览器会话 → 配对后才直连聊天。 `training/browser/index.html:18、44–54` 和 `training/browser/app.js:429–475` 是网页确认、列表和撤销界面。 `training/chat_cloud.cmd:3–13` 默认入口从 8776 改到 8775；`training/CLOUD_CHAT.md:3–20` 与 `desktop-pet/README.md:44–46` 说明新入口。 `training/test_desktop_pairing.py:14–89` 测试错误来源、未授权、过期、重用及撤销后断开正在输出的连接。
+- 因为：桌宠自动领取网页会话会创建另一份资料。授权配对允许只给这台桌宠聊天权限，并单独收回。
+- 我能改：`training/desktop_pairing.py:11` 的 `PAIR_SECONDS`，单位为秒。
+- 工具：SQLite —— 一致性备份和凭证摘要存储；Python 测试 —— 核验授权和连接断开；Git —— 查改动与旧回归；Computer Use —— 核验真实 Edge 页面。
+- 总结：桌宠得到日常网页账户确认后才能使用同一份档案，权限可撤销。实施前后确认原有 13 个聊天、240 条消息和日常 Hermes 两条原档案仍在。真实桌宠验收需主人亲自确认。
+
+## [2026-11-15] 8775 网页识别已保存的 DeepSeek 配置
+- 改了：`training/chat_web.py:181–186` 负责网页连接就绪状态。8775 云端选项只检查进程环境变量 → 复用已有配置检查，也识别 Windows 用户加密保存的密钥。
+- 因为：模型选择已识别原配置，但网页仍显示云端未配置，导致发送按钮禁用。
+- 我能改：`training/chat_web.py:185` 的 `configured` 决定网页云端选项是否启用发送。
+- 工具：Python 测试验证模型与配置，Computer Use 核对 Edge 实际状态，curl 下载桌宠运行文件。
+- 总结：原有配置能启用 8775 云端选项，姓名和学校依旧直接从本机档案回答。
+
+## [2026-11-15] 修正桌宠右键菜单按下就消失的问题
+- 改了：`desktop-pet/renderer/pet.js:269–276` 负责桌宠鼠标按下和拖拽。点击菜单按钮时先隐藏菜单 → 先判断事件是否在菜单或输入框里。
+- 因为：按下事件先于点击事件，菜单过早消失导致按钮收不到点击；在通用处理里保护控件即可。
+- 我能改：`desktop-pet/renderer/pet.js:270` 的 `.menu, .ask` 选择器决定哪些控件自行处理点击。
+- 工具：Computer Use —— 真机操作；Node —— 脚本语法检查；curl、PowerShell —— 下载和校验锁定的 Electron。
+- 总结：右键菜单可以正常打开聊天，并已在正式桌宠上触发配对码。

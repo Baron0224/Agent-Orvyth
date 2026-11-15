@@ -34,6 +34,7 @@ from chat_preferences import addressed, prompt as preference_prompt
 import auto_router
 from live_news import is_news_request, requested_day, login_next_step, evidence_answer, result_clarification, translate_saved_titles
 import local_web_tasks
+from desktop_pairing import DesktopPairing
 
 ASSETS = Path(__file__).with_name("browser")
 
@@ -41,6 +42,16 @@ def default_database_path():
     base = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / ".local" / "share")))
     legacy = base / "OpenAgent" / "browser.sqlite3"
     return legacy if legacy.exists() else base / "Orvyth" / "browser.sqlite3"
+
+
+def configured_desktop_owner():
+    path = default_database_path().with_name('desktop-owner.txt')
+    if not path.exists():
+        return None
+    owner = path.read_text(encoding='ascii').strip()
+    if not re.fullmatch(r'[a-f0-9]{64}', owner):
+        raise ValueError('本机桌面配对的账户编号格式不正确。')
+    return owner
 
 WEB_PRIVACY = (
     "浏览器版会将成功完成的聊天记录、待办任务、昵称、头像和偏好保存在这台电脑的 Orvyth 数据库中，"
@@ -70,7 +81,7 @@ def engine_label(engine, model, reason=''):
 
 class ChatServer(ThreadingHTTPServer):
     daemon_threads = True
-    def __init__(self, port=8765, model=DEFAULT_MODEL, db_path=None, tool_model=None):
+    def __init__(self, port=8765, model=DEFAULT_MODEL, db_path=None, tool_model=None, desktop_owner=None):
         LocalChat(model)
         self.provider = 'deepseek' if is_cloud(model) else 'ollama'
         self.cloud_verified = False
@@ -95,6 +106,14 @@ class ChatServer(ThreadingHTTPServer):
         self.generation_lock = threading.Lock()
         self.chat_locks = {}
         self.locks_guard = threading.Lock()
+        self.desktop = None
+        if desktop_owner:
+            if port != 8775 or is_cloud(model):
+                raise ValueError("桌面配对只支持 8775 正式后台。")
+            with self.store.connect() as db:
+                if not db.execute("SELECT 1 FROM owners WHERE id=?", (desktop_owner,)).fetchone():
+                    raise ValueError("桌面配对指定的日常账户不存在。")
+            self.desktop = DesktopPairing(self.store.path.with_name('desktop-pairing.sqlite3'), desktop_owner)
         super().__init__(("127.0.0.1", port), Handler)
         self.origin = f"http://127.0.0.1:{self.server_port}"
         self.verify_pi_final = self.server_port == 8775
@@ -163,7 +182,8 @@ class ChatServer(ThreadingHTTPServer):
         model=self.selected_model(owner) if owner else self.model
         engine = self.engine_of(owner) if owner and self.server_port == 8775 else None
         if is_cloud(model):
-            configured = bool(os.environ.get('DEEPSEEK_API_KEY', '').strip())
+            configured = (self.cloud_key_ready() if engine else
+                          bool(os.environ.get('DEEPSEEK_API_KEY', '').strip()))
             try: names = {item.get('name') for item in self.installed_models()}
             except (OSError, ValueError, urllib.error.URLError): names = set()
             status = {'ready': configured, 'configured': configured, 'verified': self.cloud_verified,
@@ -202,6 +222,55 @@ class ChatServer(ThreadingHTTPServer):
         return {**self.store.state(owner), "privacy": self.privacy}
 
 class Handler(BaseHTTPRequestHandler):
+    desktop_digest = None
+
+    def finish(self):
+        try:
+            super().finish()
+        finally:
+            if self.desktop_digest:
+                self.server.desktop.release(self.desktop_digest, self.connection)
+
+    def desktop_owner(self):
+        token = self.headers.get('X-Orvyth-Desktop', '')
+        pairing = self.server.desktop
+        if pairing and token:
+            self.desktop_digest = pairing.authorize(token, self.connection)
+            if self.desktop_digest:
+                return pairing.owner
+        self.json_response(401, {'error': '桌面精灵尚未配对，或配对已撤销。'})
+        return None
+
+    def desktop_action(self, payload):
+        pairing = self.server.desktop
+        if not pairing:
+            self.json_response(404, {'error': '此后台未启用桌面配对。'})
+            return
+        action = self.path.rsplit('/', 1)[1]
+        code = payload.get('code')
+        if action in ('approve', 'claim') and (not isinstance(code, str) or not re.fullmatch(r'[0-9]{8}', code)):
+            raise ValueError('请输入八位配对码。')
+        if action == 'start':
+            result = pairing.start()
+        elif action == 'claim':
+            proof = payload.get('proof')
+            if not isinstance(proof, str) or not re.fullmatch(r'[A-Za-z0-9_-]{43}', proof):
+                raise ValueError('配对请求无效，请重新开始。')
+            result = pairing.claim(code, proof)
+        else:
+            if self.owner()[1] != pairing.owner:
+                self.json_response(403, {'error': '请在已登录日常账户的网页确认。'})
+                return
+            if action == 'approve':
+                pairing.approve(code)
+            elif action == 'revoke':
+                key = payload.get('id')
+                if not isinstance(key, str) or not re.fullmatch(r'[a-f0-9]{64}', key):
+                    raise ValueError('凭证编号不正确。')
+                pairing.revoke(key)
+            result = {'devices': pairing.list()}
+        self.json_response(200, result)
+
     def log_message(self, *_):
         pass
     def headers_for(self, status, content_type, cookie=None):
@@ -244,6 +313,14 @@ class Handler(BaseHTTPRequestHandler):
         if not self.valid_host():
             return
         route = urlsplit(self.path).path
+        if self.path == '/api/desktop/session':
+            if self.headers.get('Origin') != self.server.origin:
+                self.json_response(403, {'error': '仅接受本机桌面连接。'})
+                return
+            owner = self.desktop_owner()
+            if owner:
+                self.json_response(200, {'active_chat': self.server.state(owner)['active_chat']})
+            return
         if urlsplit(self.path).path=='/api/file-preview':
             try:
                 _,owner=self.owner()
@@ -309,6 +386,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         routes = {"/api/pi/run", "/api/chat", "/api/clear", "/api/profile", "/api/chats/new", "/api/chats/open", "/api/chats/rename", "/api/chats/delete", "/api/tasks/add", "/api/tasks/toggle", "/api/tasks/delete", "/api/tasks/fire"}
         routes.add('/api/memory')
+        routes.update('/api/desktop/' + action for action in ('start', 'claim', 'approve', 'list', 'revoke'))
         if self.path not in routes:
             self.json_response(404, {"error": "接口不存在。"})
             return
@@ -326,7 +404,23 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, UnicodeDecodeError):
             self.json_response(400, {"error": "请求内容为空、过大或格式不正确。"})
             return
-        _, owner = self.owner()
+        if self.path.startswith('/api/desktop/'):
+            try:
+                self.desktop_action(payload)
+            except ValueError as error:
+                self.json_response(400, {'error': str(error)})
+            except sqlite3.Error:
+                self.json_response(503, {'error': '配对资料暂时无法读写。'})
+            return
+        if 'X-Orvyth-Desktop' in self.headers:
+            if self.path != '/api/chat':
+                self.json_response(403, {'error': '桌面凭证仅用于聊天。'})
+                return
+            owner = self.desktop_owner()
+            if not owner:
+                return
+        else:
+            _, owner = self.owner()
         if not owner:
             self.json_response(410, {"error": "本机资料尚未载入，请刷新页面。"})
             return
@@ -720,9 +814,13 @@ def main():
     parser.add_argument("--tool-model", help="Pi文件工具使用的本机模型；R1聊天默认保留Qwen3 8B工具模型")
     parser.add_argument("--data-dir", type=Path, help="指定本机数据目录；默认保存在用户应用数据目录")
     parser.add_argument("--open", action="store_true", help="启动后打开默认浏览器")
+    parser.add_argument("--desktop-owner", help="允许确认桌面配对的现有日常账户编号")
     args = parser.parse_args()
     try:
-        server = ChatServer(args.port, args.model, args.data_dir / "browser.sqlite3" if args.data_dir else None, tool_model=args.tool_model)
+        desktop_owner = args.desktop_owner
+        if desktop_owner is None and args.port == 8775 and args.data_dir is None and not is_cloud(args.model):
+            desktop_owner = configured_desktop_owner()
+        server = ChatServer(args.port, args.model, args.data_dir / "browser.sqlite3" if args.data_dir else None, tool_model=args.tool_model, desktop_owner=desktop_owner)
     except (OSError, ValueError, sqlite3.Error) as error:
         parser.exit(1, f"无法启动：{error}\n如果页面已经打开，可直接使用；端口被占用时可添加 --port 8766。\n")
     print(f"Orvyth 已启动：{server.origin}", flush=True)
