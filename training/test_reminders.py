@@ -24,6 +24,47 @@ class ReminderTest(unittest.TestCase):
         self.addCleanup(self.now.stop)
         self.addCleanup(self.tmp.cleanup)
 
+    def test_daily_account_web_and_worker_can_only_claim_once(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        from reminder_delivery import claim
+        self.store.native_reminder_owner = self.owner
+        self.store.reminder_chat(self.owner, self.chat, '2分钟后提醒我测试纸桥')
+        barrier = Barrier(2)
+        with patch('browser_store.local_now', return_value=moment(2, 12, 3)):
+            task = self.store.state(self.owner)['tasks'][0]
+            self.assertTrue(task['remind_due'])
+
+            def web():
+                barrier.wait(timeout=3)
+                return self.store.task_action(self.owner, 'fire', {'id': task['id']})
+
+            def worker():
+                with self.store.connect() as db:
+                    barrier.wait(timeout=3)
+                    return bool(claim(db, self.owner, task['id'], moment(2, 12, 3), catch_up=True))
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                web_result = executor.submit(web)
+                worker_result = executor.submit(worker)
+                self.assertEqual(sorted([web_result.result(), worker_result.result()]), [False, True])
+            self.assertTrue(self.store.state(self.owner)['tasks'][0]['done'])
+
+    def test_worker_groups_overdue_and_retries_after_notification_failure(self):
+        from unittest.mock import Mock
+        from reminder_worker import deliver
+        for title in ('测试纸塔', '测试纸船'):
+            self.store.reminder_chat(self.owner, self.chat, f'2分钟后提醒我{title}')
+        now = moment(2, 12, 5)
+        with patch('reminder_worker.notify', side_effect=OSError), self.assertRaises(OSError):
+            deliver(self.store.path, self.owner, now, Mock())
+        with patch('reminder_worker.notify') as notify:
+            deliver(self.store.path, self.owner, now, Mock())
+            deliver(self.store.path, self.owner, now, Mock())
+        notify.assert_called_once()
+        self.assertIn('已过期：测试纸塔', notify.call_args.args[1])
+        self.assertIn('已过期：测试纸船', notify.call_args.args[1])
+
     def test_dialog_and_daily_due_time(self):
         self.assertIn('几点', self.store.reminder_chat(self.owner, self.chat, '我想打卡'))
         self.assertIn('几天', self.store.reminder_chat(self.owner, self.chat, '下午一点'))

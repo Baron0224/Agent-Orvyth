@@ -663,3 +663,11 @@
 - 我能改：`training/browser_store.py:168` 的 `LIMIT 10` 可下调历史上限。
 - 工具：PowerShell —— 备份和恢复后台。Python 标准库 —— 跑回归并观察实际出站请求。
 - 一句话：云端接得上刚才的聊天，读过的文件仍只留在本机。
+
+## [2026-11-15] 提醒在 Windows 登录后独立运行
+- 改了：`training/reminder_worker.py:17-67`、`training/reminder_toast.ps1:1-20` —— 定期读待办和发 Windows 通知。网页得开着 → 当前用户登录后由独立进程派送。
+- 改了：`training/reminder_delivery.py:6-54`、`training/browser_store.py:300-323`、`training/chat_web.py:442-448`、`training/browser/app.js:64-86` —— 登记提醒与反馈给网页。先响后登记 → 两端争取同一个登记，拿到才响。`training/test_reminders.py:27-65` 验证并发及发送失败重试。
+- 因为：关闭网页后原来的提醒链路中断，而且多端可能同时发现同一条到期记录。
+- 我能改：`training/reminder_worker.py:63` 的 `time.sleep(2)` 控制检查间隔。停用或恢复通过计划任务 Orvyth Daily Reminders。
+- 工具：SQLite —— 备份和登记。PowerShell —— 安装计划任务、派送并核对系统通知。Python 和 Node —— 运行回归。computer-use —— 尝试核对 Edge 标签，网址未确认后停止。
+- 一句话：网页关着，登录 Windows 后也有进程替你发提醒。

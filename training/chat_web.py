@@ -96,7 +96,8 @@ class ChatServer(ThreadingHTTPServer):
             default_path = base / 'Orvyth' / 'cloud' / 'browser.sqlite3'
         elif db_path is None:
             default_path = default_database_path()
-        self.store = Store(db_path or default_path, cloud_history=port == 8775 and not is_cloud(model))
+        self.store = Store(db_path or default_path, cloud_history=port == 8775 and not is_cloud(model),
+                           native_reminder_owner=desktop_owner if port == 8775 else None)
         self.memory = HermesMemory(self.store.path.parent / 'hermes-memory')
         self.model = model
         self.tool_model = tool_model or ('qwen3:8b' if model.startswith('deepseek-r1') or is_cloud(model) else model)
@@ -441,7 +442,10 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path.startswith("/api/tasks/"):
                 if self.path != "/api/tasks/add" and not isinstance(payload.get("id"), str):
                     raise ValueError("任务编号不正确。")
-                self.server.store.task_action(owner, self.path.rsplit("/", 1)[1], payload)
+                claimed = self.server.store.task_action(owner, self.path.rsplit("/", 1)[1], payload)
+                if self.path == "/api/tasks/fire":
+                    self.json_response(200, {"claimed": claimed})
+                    return
             elif self.path == "/api/chats/new":
                 self.server.store.chat_action(owner, "new")
             else:
@@ -604,6 +608,8 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             return
         factual_reminder = reminders.capability_answer(question)
+        if factual_reminder is not None and owner == self.server.store.native_reminder_owner:
+            factual_reminder = '会。Windows 登录后，Orvyth 提醒进程会按待办时间发送系统通知，网页关着也可以。请保持 Windows 通知开启。'
         reminder = factual_reminder if factual_reminder is not None else self.server.store.reminder_chat(owner, chat, question)
         if reminder is not None:
             reminder = addressed(reminder, profile.get("user_address", ""))

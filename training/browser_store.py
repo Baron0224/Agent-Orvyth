@@ -13,6 +13,7 @@ import time
 import uuid
 from datetime import datetime, date, timedelta
 from file_preview import cards
+from reminder_delivery import claim
 
 
 def local_now():
@@ -24,8 +25,9 @@ class MissingRecord(ValueError):
 
 
 class Store:
-    def __init__(self, path, *, cloud_history=False):
+    def __init__(self, path, *, cloud_history=False, native_reminder_owner=None):
         self.path = Path(path)
+        self.native_reminder_owner = native_reminder_owner
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
             db.executescript("""
@@ -115,11 +117,11 @@ class Store:
                     if item["due_at"] is not None:
                         due = item["due_at"]
                         # 页面一直没打开、错过超过 10 分钟：标记“已错过”并归档，保留原定触发时间。
-                        if not item["fired_at"] and not item["last_done_date"] and now.timestamp() >= due + 600:
+                        if owner != self.native_reminder_owner and not item["fired_at"] and not item["last_done_date"] and now.timestamp() >= due + 600:
                             db.execute("UPDATE tasks SET fired_at=?, missed=1 WHERE id=? AND owner=?", (due, item["id"], owner))
                             item["fired_at"] = due
                             item["missed"] = 1
-                        elif not item["fired_at"] and not item["last_done_date"] and now.timestamp() >= due + 10:
+                        elif owner != self.native_reminder_owner and not item["fired_at"] and not item["last_done_date"] and now.timestamp() >= due + 10:
                             # 页面正在轮询（说明网页开着）：到点 10 秒后服务端兜底归档，不单靠前端回报。
                             db.execute("UPDATE tasks SET fired_at=?, missed=0 WHERE id=? AND owner=?", (due, item["id"], owner))
                             item["fired_at"] = due
@@ -153,6 +155,7 @@ class Store:
             merged = {**DEFAULTS, **{k: v for k, v in json.loads(profile["profile"]).items() if k not in RETIRED}}
             merged.setdefault('chat_engine', 'auto')
             return {"profile": merged, "chats": chats, "tasks": tasks,
+                    "native_reminders": owner == self.native_reminder_owner,
                     "active_chat": profile["active_chat"], "messages": messages}
 
     def history(self, owner, chat):
@@ -309,15 +312,17 @@ class Store:
                 today = now.date().isoformat()
                 if not row["remind_time"]:
                     raise ValueError("这个事项没有设置提醒时间。")
+                if owner == self.native_reminder_owner:
+                    return claim(db, owner, task, now, grace=8) is not None
                 if row["due_at"] is not None:
                     if row["fired_at"] or row["last_done_date"]:
-                        return
+                        return False
                     db.execute("UPDATE tasks SET fired_at=?, missed=0 WHERE id=? AND owner=?", (min(now.timestamp(), row["due_at"] + 600), task, owner))
                 else:
                     if row["last_fire_date"] == today:
-                        return
+                        return False
                     db.execute("UPDATE tasks SET last_fire_date=?, fired_at=? WHERE id=? AND owner=?", (today, now.timestamp(), task, owner))
-                return
+                return True
             if action == "toggle":
                 if not isinstance(payload.get("done"), bool):
                     raise ValueError("任务状态不正确。")

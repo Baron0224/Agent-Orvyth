@@ -38,6 +38,11 @@ function playChime() {
   } catch {}
 }
 function notificationSettings() {
+  if (state?.native_reminders) {
+    notificationButton.hidden = true;
+    notificationStatus.textContent = 'Windows 登录后，Orvyth 提醒进程会按时发系统通知，网页可以关闭。';
+    return;
+  }
   const permission = notifier.permission();
   notificationButton.hidden = permission === 'unsupported';
   notificationButton.disabled = permission === 'denied';
@@ -56,19 +61,28 @@ function showReminderPopup(tasks) {
   const content = document.createElement('span'); content.textContent = `时间到：${tasks.map(task => task.title).join('、')}`;
   popup.append(close, title, content); document.body.append(popup);
 }
-function deliverReminders(tasks) {
+async function deliverReminders(tasks) {
   const due = tasks.filter(task => task.remind_due && !task.done && !task.waiting);
   const fresh = due.filter(task => !shownReminders.has(reminderKey(task)));
   fresh.forEach(task => shownReminders.add(reminderKey(task)));
-  if (fresh.length) {
-    const text = `时间到：${fresh.map(task => task.title).join('、')}`;
+  const claimed = (await Promise.all(fresh.map(async task => {
+    try {
+      const result = await requestJSON('/api/tasks/fire', {id: task.id});
+      return result.claimed ? task : null;
+    } catch {
+      return null;
+    } finally {
+      shownReminders.delete(reminderKey(task));
+    }
+  }))).filter(Boolean);
+  const popup = claimed.filter(task => !notifier.notify(task));
+  if (popup.length) {
+    const text = `时间到：${popup.map(task => task.title).join('、')}`;
     $('#task-notice').textContent = text;
     if (!busy) setPet('happy', text);
-    showReminderPopup(fresh);
+    showReminderPopup(popup);
     playChime();
-    fresh.forEach(task => requestJSON('/api/tasks/fire', {id: task.id}).then(applyState).catch(() => {}));
   }
-  due.forEach(task => notifier.notify(task));
 }
 notificationButton.addEventListener('click', async () => {
   if (!notifier.supported()) return;
@@ -235,6 +249,7 @@ function renderTasks() {
 }
 function applyState(data, full = false) {
   state = data;
+  notificationSettings();
   if (full) activeChat = data.active_chat;
   renderProfile(); renderHistory(); renderTasks();
   if (full) {
@@ -266,7 +281,7 @@ async function initialize() {
     deliverReminders(data.tasks);
     await checkConnection();
     const missed = data.tasks.filter(task => task.missed && task.done).length;
-    if (missed) setNotice(`有 ${missed} 条提醒在网页关闭时错过了，已标记“已错过”并归档到已完成。`);
+    if (missed) setNotice(`有 ${missed} 条已过期提醒已归档到已完成。`);
   } catch (error) { setNotice(error.message || '连接失败，请刷新页面。'); $('#reconnect').hidden = false; }
   controls();
 }
